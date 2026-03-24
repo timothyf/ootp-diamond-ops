@@ -24,12 +24,10 @@ class MySqlRepository:
     def __init__(
             self,
             connection_url: str,
-            mlb_team_name: str = "Detroit Tigers",
-            aaa_team_name: str = "Toledo Mud Hens",
+            mlb_team_name: str | None = None,
+            aaa_team_name: str | None = None,
     ) -> None:
             self.connection_url = connection_url
-            self.mlb_team_name = mlb_team_name
-            self.aaa_team_name = aaa_team_name
 
             try:
                     from sqlalchemy import create_engine
@@ -39,15 +37,15 @@ class MySqlRepository:
                     ) from exc
 
             self._engine = create_engine(connection_url)
-            self._query_map = {
-                    "tigers_roster.csv": lambda: self._build_roster(self.mlb_team_name),
-                    "toledo_roster.csv": lambda: self._build_roster(self.aaa_team_name),
-                    "tigers_batting.csv": lambda: self._build_batting(self.mlb_team_name),
-                    "toledo_batting.csv": lambda: self._build_batting(self.aaa_team_name),
-                    "tigers_pitching.csv": lambda: self._build_pitching(self.mlb_team_name),
-                    "toledo_pitching.csv": lambda: self._build_pitching(self.aaa_team_name),
-                    "player_ratings.csv": self._build_player_ratings,
-            }
+
+            detected_mlb, detected_aaa = self._infer_default_team_names()
+            self.mlb_team_name = mlb_team_name or detected_mlb
+            self.aaa_team_name = aaa_team_name or detected_aaa
+
+            self.mlb_file_prefix = self._team_file_prefix(self.mlb_team_name, prefer="last")
+            self.aaa_file_prefix = self._team_file_prefix(self.aaa_team_name, prefer="first")
+            self._mlb_aliases = self._team_prefix_aliases(self.mlb_team_name, self.mlb_file_prefix)
+            self._aaa_aliases = self._team_prefix_aliases(self.aaa_team_name, self.aaa_file_prefix)
 
     def smoke_check(self) -> None:
         """Verify DB connectivity and that all required tables are present.
@@ -86,11 +84,129 @@ class MySqlRepository:
             from sqlalchemy import text
             return pd.read_sql_query(text(sql), self._engine, params=params)
 
+    @staticmethod
+    def _clean_team_name(value: str | None, fallback: str) -> str:
+            cleaned = (value or "").strip()
+            return cleaned if cleaned else fallback
+
+    @staticmethod
+    def _team_file_prefix(team_name: str, prefer: str = "first") -> str:
+            parts = [p for p in str(team_name).lower().replace("-", " ").split() if p]
+            if not parts:
+                return "team"
+            return parts[-1] if prefer == "last" else parts[0]
+
+    @staticmethod
+    def _team_prefix_aliases(team_name: str, preferred_prefix: str) -> set[str]:
+            parts = [p for p in str(team_name).lower().replace("-", " ").split() if p]
+            aliases: set[str] = set(parts)
+            if parts:
+                aliases.add("_".join(parts))
+                aliases.add(parts[0])
+                aliases.add(parts[-1])
+            aliases.add(preferred_prefix)
+            return {a for a in aliases if a}
+
+    def _infer_default_team_names(self) -> tuple[str, str]:
+            from sqlalchemy import text
+
+            mlb_name = "MLB Team"
+            aaa_name = "AAA Team"
+
+            try:
+                with self._engine.connect() as conn:
+                    mlb_row = conn.execute(
+                        text(
+                            """
+                            SELECT team_id, TRIM(CONCAT(COALESCE(name, ''), ' ', COALESCE(nickname, ''))) AS full_name
+                            FROM teams
+                            WHERE human_team = 1
+                            ORDER BY team_id
+                            LIMIT 1
+                            """
+                        )
+                    ).fetchone()
+
+                    if mlb_row is None:
+                        mlb_row = conn.execute(
+                            text(
+                                """
+                                SELECT team_id, TRIM(CONCAT(COALESCE(name, ''), ' ', COALESCE(nickname, ''))) AS full_name
+                                FROM teams
+                                WHERE level = 1
+                                ORDER BY team_id
+                                LIMIT 1
+                                """
+                            )
+                        ).fetchone()
+
+                    if mlb_row is not None:
+                        mlb_team_id = int(mlb_row._mapping["team_id"])
+                        mlb_name = self._clean_team_name(mlb_row._mapping["full_name"], mlb_name)
+
+                        aaa_row = conn.execute(
+                            text(
+                                """
+                                SELECT TRIM(CONCAT(COALESCE(name, ''), ' ', COALESCE(nickname, ''))) AS full_name
+                                FROM teams
+                                WHERE parent_team_id = :parent_team_id
+                                ORDER BY CASE WHEN level = 2 THEN 0 ELSE 1 END, level, team_id
+                                LIMIT 1
+                                """
+                            ),
+                            {"parent_team_id": mlb_team_id},
+                        ).fetchone()
+
+                        if aaa_row is None:
+                            aaa_row = conn.execute(
+                                text(
+                                    """
+                                    SELECT TRIM(CONCAT(COALESCE(name, ''), ' ', COALESCE(nickname, ''))) AS full_name
+                                    FROM teams
+                                    WHERE level = 2
+                                    ORDER BY team_id
+                                    LIMIT 1
+                                    """
+                                )
+                            ).fetchone()
+
+                        if aaa_row is not None:
+                            aaa_name = self._clean_team_name(aaa_row._mapping["full_name"], aaa_name)
+            except Exception:
+                pass
+
+            return mlb_name, aaa_name
+
+    def _team_name_from_dataset_prefix(self, prefix: str) -> str | None:
+            token = prefix.strip().lower()
+            if token in self._mlb_aliases:
+                return self.mlb_team_name
+            if token in self._aaa_aliases:
+                return self.aaa_team_name
+            return None
+
     def load(self, name: str) -> pd.DataFrame:
-            builder = self._query_map.get(name)
-            if builder is None:
-                    raise ValueError(f"Unsupported dataset '{name}' for MySqlRepository")
-            return builder()
+            dataset = Path(name).name.lower()
+            if dataset == "player_ratings.csv":
+                return self._build_player_ratings()
+
+            suffix_to_builder = {
+                "_roster.csv": self._build_roster,
+                "_batting.csv": self._build_batting,
+                "_pitching.csv": self._build_pitching,
+            }
+            for suffix, builder in suffix_to_builder.items():
+                if dataset.endswith(suffix):
+                    prefix = dataset[: -len(suffix)]
+                    team_name = self._team_name_from_dataset_prefix(prefix)
+                    if team_name is None:
+                        raise ValueError(
+                            f"Unsupported team dataset '{name}'. Recognized prefixes: "
+                            f"{sorted(self._mlb_aliases | self._aaa_aliases)}"
+                        )
+                    return builder(team_name)
+
+            raise ValueError(f"Unsupported dataset '{name}' for MySqlRepository")
 
     def _build_roster(self, team_name: str) -> pd.DataFrame:
             sql = """

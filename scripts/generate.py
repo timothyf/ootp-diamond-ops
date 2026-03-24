@@ -45,13 +45,21 @@ def _parse_args() -> argparse.Namespace:
         "--mlb-team",
         default=None,
         metavar="NAME",
-        help="MLB team name as stored in the DB (default: 'Detroit Tigers'). Overrides OOTP_MLB_TEAM_NAME.",
+        help=(
+            "MLB team name as stored in the DB. "
+            "Overrides OOTP_MLB_TEAM_NAME. "
+            "If omitted, the repository auto-detects from DB metadata."
+        ),
     )
     parser.add_argument(
         "--aaa-team",
         default=None,
         metavar="NAME",
-        help="AAA team name as stored in the DB (default: 'Toledo Mud Hens'). Overrides OOTP_AAA_TEAM_NAME.",
+        help=(
+            "AAA team name as stored in the DB. "
+            "Overrides OOTP_AAA_TEAM_NAME. "
+            "If omitted, the repository auto-detects from DB metadata."
+        ),
     )
     return parser.parse_args()
 
@@ -72,12 +80,12 @@ def main() -> None:
     mlb_team_name = (
         args.mlb_team
         or os.getenv("OOTP_MLB_TEAM_NAME", "").strip()
-        or "Detroit Tigers"
+        or None
     )
     aaa_team_name = (
         args.aaa_team
         or os.getenv("OOTP_AAA_TEAM_NAME", "").strip()
-        or "Toledo Mud Hens"
+        or None
     )
 
     repository = None
@@ -94,7 +102,7 @@ def main() -> None:
             mlb_team_name=mlb_team_name,
             aaa_team_name=aaa_team_name,
         )
-        print(f"Data source: MySQL ({mlb_team_name} / {aaa_team_name})")
+        print(f"Data source: MySQL ({repository.mlb_team_name} / {repository.aaa_team_name})")
         print("Running DB smoke-check…", end=" ", flush=True)
         repository.smoke_check()
         print("OK")

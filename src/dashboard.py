@@ -41,23 +41,26 @@ class DashboardGenerator:
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(exist_ok=True)
 
-        self.mlb_batting_filename = "tigers_batting.csv"
-        self.mlb_pitching_filename = "tigers_pitching.csv"
-        self.mlb_roster_filename = "tigers_roster.csv"
+        self.repository = repository or CsvRepository(self.data_dir)
+
+        default_mlb_prefix, default_aaa_prefix = self._discover_team_file_prefixes()
+        mlb_prefix = str(getattr(self.repository, "mlb_file_prefix", default_mlb_prefix)).strip() or default_mlb_prefix
+        aaa_prefix = str(getattr(self.repository, "aaa_file_prefix", default_aaa_prefix)).strip() or default_aaa_prefix
+
+        self.mlb_batting_filename = f"{mlb_prefix}_batting.csv"
+        self.mlb_pitching_filename = f"{mlb_prefix}_pitching.csv"
+        self.mlb_roster_filename = f"{mlb_prefix}_roster.csv"
         self.mlb_team_name = self._team_name_from_filename(self.mlb_batting_filename)
 
-        self.aaa_batting_filename = "toledo_batting.csv"
-        self.aaa_pitching_filename = "toledo_pitching.csv"
-        self.aaa_roster_filename = "toledo_roster.csv"
+        self.aaa_batting_filename = f"{aaa_prefix}_batting.csv"
+        self.aaa_pitching_filename = f"{aaa_prefix}_pitching.csv"
+        self.aaa_roster_filename = f"{aaa_prefix}_roster.csv"
         self.aaa_team_name = self._team_name_from_filename(self.aaa_batting_filename)
 
-        self.repository = repository or CsvRepository(self.data_dir)
-        # Use the city portion of the full team name when the repository knows it,
-        # so MLB and AAA labels are both city-based (e.g. "Detroit" / "Toledo").
         if hasattr(self.repository, "mlb_team_name"):
-            self.mlb_team_name = self.repository.mlb_team_name.split()[0]
+            self.mlb_team_name = str(self.repository.mlb_team_name).split()[0]
         if hasattr(self.repository, "aaa_team_name"):
-            self.aaa_team_name = self.repository.aaa_team_name.split()[0]
+            self.aaa_team_name = str(self.repository.aaa_team_name).split()[0]
         self.transformer = transformer or PlayerDataTransformer()
         self.metrics = metrics or MetricsCalculator(self.transformer)
         self.lineup_planner = lineup_planner or LineupPlanner()
@@ -91,11 +94,31 @@ class DashboardGenerator:
         name = base.replace("_", " ").replace("-", " ").strip()
         return name.title() if name else "MLB"
 
+    def _discover_team_file_prefixes(self) -> tuple[str, str]:
+        prefixes: list[str] = []
+        for batting_file in sorted(self.data_dir.glob("*_batting.csv")):
+            prefix = batting_file.stem.rsplit("_", 1)[0]
+            if not prefix:
+                continue
+            if (self.data_dir / f"{prefix}_pitching.csv").exists() and (self.data_dir / f"{prefix}_roster.csv").exists():
+                prefixes.append(prefix)
+
+        unique_prefixes = sorted(set(prefixes))
+        if len(unique_prefixes) >= 2:
+            return unique_prefixes[0], unique_prefixes[1]
+        if len(unique_prefixes) == 1:
+            return unique_prefixes[0], "aaa"
+        return "mlb", "aaa"
+
     def _html_shell(self, title: str, body: str, active_page: str | None = None) -> str:
         mlb_hitters_slug = self._slugify(f"{self.mlb_team_name} hitters - current value")
         mlb_pitchers_slug = self._slugify(f"{self.mlb_team_name} pitchers - current value")
         aaa_hitters_slug = self._slugify(f"{self.aaa_team_name} hitters - promotion board")
         aaa_pitchers_slug = self._slugify(f"{self.aaa_team_name} pitchers - promotion board")
+        mlb_hitting_stats_slug = self._slugify(f"{self.mlb_team_name} hitting stats")
+        mlb_pitching_stats_slug = self._slugify(f"{self.mlb_team_name} pitching stats")
+        aaa_hitting_stats_slug = self._slugify(f"{self.aaa_team_name} hitting stats")
+        aaa_pitching_stats_slug = self._slugify(f"{self.aaa_team_name} pitching stats")
 
         nav_items = [
             ("dashboard", "dashboard.html", "Dashboard"),
@@ -118,6 +141,26 @@ class DashboardGenerator:
                 aaa_pitchers_slug,
                 f"{aaa_pitchers_slug}.html",
                 f"{self.aaa_team_name} Pitchers",
+            ),
+            (
+                mlb_hitting_stats_slug,
+                f"{mlb_hitting_stats_slug}.html",
+                f"{self.mlb_team_name} Hitting Stats",
+            ),
+            (
+                mlb_pitching_stats_slug,
+                f"{mlb_pitching_stats_slug}.html",
+                f"{self.mlb_team_name} Pitching Stats",
+            ),
+            (
+                aaa_hitting_stats_slug,
+                f"{aaa_hitting_stats_slug}.html",
+                f"{self.aaa_team_name} Hitting Stats",
+            ),
+            (
+                aaa_pitching_stats_slug,
+                f"{aaa_pitching_stats_slug}.html",
+                f"{self.aaa_team_name} Pitching Stats",
             ),
             ("recommended_transactions", "recommended_transactions.html", "Transactions"),
         ]
@@ -372,11 +415,21 @@ class DashboardGenerator:
 """
 
     def _output_sections(self, outputs: DashboardOutputs) -> list[tuple[str, pd.DataFrame, str | None]]:
+        frames = getattr(self, "_latest_frames", {})
+        mlb_hitters_stats = self._build_hitter_standard_stats(frames.get("mlb_hitters", pd.DataFrame()))
+        mlb_pitchers_stats = self._build_pitcher_standard_stats(frames.get("mlb_pitchers", pd.DataFrame()))
+        aaa_hitters_stats = self._build_hitter_standard_stats(frames.get("aaa_hitters", pd.DataFrame()))
+        aaa_pitchers_stats = self._build_pitcher_standard_stats(frames.get("aaa_pitchers", pd.DataFrame()))
+
         return [
             (f"{self.mlb_team_name} hitters - current value", outputs.mlb_hitters_dashboard, "mlb_hitters"),
             (f"{self.mlb_team_name} pitchers - current value", outputs.mlb_pitchers_dashboard, "mlb_pitchers"),
             (f"{self.aaa_team_name} hitters - promotion board", outputs.aaa_hitters_dashboard, "aaa_hitters"),
             (f"{self.aaa_team_name} pitchers - promotion board", outputs.aaa_pitchers_dashboard, "aaa_pitchers"),
+            (f"{self.mlb_team_name} hitting stats", mlb_hitters_stats, "mlb_hitters"),
+            (f"{self.mlb_team_name} pitching stats", mlb_pitchers_stats, "mlb_pitchers"),
+            (f"{self.aaa_team_name} hitting stats", aaa_hitters_stats, "aaa_hitters"),
+            (f"{self.aaa_team_name} pitching stats", aaa_pitchers_stats, "aaa_pitchers"),
             ("Recommended lineup vs RHP", outputs.recommended_lineup_vs_rhp, "mlb_hitters"),
             ("Recommended lineup vs LHP", outputs.recommended_lineup_vs_lhp, "mlb_hitters"),
             ("Platoon diagnostics", outputs.platoon_diagnostics, "mlb_hitters"),
@@ -867,8 +920,48 @@ class DashboardGenerator:
                     score_col: "score",
                 }
             )
+            .assign(pa=lambda x: x["pa"].fillna(0).round().astype(int))
             .head(15)
         )
+
+    @staticmethod
+    def _build_hitter_standard_stats(df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return pd.DataFrame()
+
+        cols = [
+            "player_name",
+            "primary_position",
+            "g",
+            "pa",
+            "ab",
+            "h",
+            "2b",
+            "3b",
+            "hr",
+            "rbi",
+            "r",
+            "bb",
+            "k",
+            "sb",
+            "cs",
+            "avg",
+            "obp",
+            "slg",
+            "ops",
+            "war",
+            "injury_text",
+        ]
+        present_cols = [c for c in cols if c in df.columns]
+        stats = (
+            df.loc[df["is_hitter"] & (df["pa"] > 0)]
+            .sort_values(["pa", "ops"], ascending=[False, False])[present_cols]
+            .copy()
+        )
+        int_cols = [c for c in ["g", "pa", "ab", "h", "2b", "3b", "hr", "rbi", "r", "bb", "k", "sb", "cs"] if c in stats.columns]
+        for col in int_cols:
+            stats[col] = stats[col].fillna(0).round().astype(int)
+        return stats
 
     @staticmethod
     def _build_aaa_hitter_dashboard(df: pd.DataFrame) -> pd.DataFrame:
@@ -901,8 +994,49 @@ class DashboardGenerator:
                     "projection_hitter_score": "score",
                 }
             )
+            .assign(pa=lambda x: x["pa"].fillna(0).round().astype(int))
             .head(15)
         )
+
+    @staticmethod
+    def _build_pitcher_standard_stats(df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return pd.DataFrame()
+
+        cols = [
+            "player_name",
+            "primary_position",
+            "g",
+            "gs",
+            "w",
+            "l",
+            "sv",
+            "hld",
+            "ip",
+            "ha",
+            "hr",
+            "er",
+            "bb",
+            "k",
+            "era",
+            "fip",
+            "whip",
+            "k_9",
+            "bb_9",
+            "hr_9",
+            "war",
+            "injury_text",
+        ]
+        present_cols = [c for c in cols if c in df.columns]
+        stats = (
+            df.loc[df["is_pitcher"] & (df["ip"] > 0)]
+            .sort_values(["ip", "era"], ascending=[False, True])[present_cols]
+            .copy()
+        )
+        int_cols = [c for c in ["g", "gs", "w", "l", "sv", "hld", "ha", "hr", "er", "bb", "k"] if c in stats.columns]
+        for col in int_cols:
+            stats[col] = stats[col].fillna(0).round().astype(int)
+        return stats
 
     @staticmethod
     def _build_pitcher_dashboard(df: pd.DataFrame, score_col: str, include_potential: bool = False) -> pd.DataFrame:
