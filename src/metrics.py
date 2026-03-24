@@ -11,6 +11,15 @@ class MetricsCalculator:
         self.transformer = transformer or PlayerDataTransformer()
 
     @staticmethod
+    def reliability_weight(sample: pd.Series, k: float) -> pd.Series:
+        s = pd.to_numeric(sample, errors="coerce").fillna(0)
+        return s / (s + float(k))
+
+    @staticmethod
+    def regress_to_baseline(value: pd.Series, baseline: float, weight: pd.Series) -> pd.Series:
+        return value * weight + baseline * (1.0 - weight)
+
+    @staticmethod
     def age_projection_bonus(series: pd.Series) -> pd.Series:
         a = pd.to_numeric(series, errors="coerce").fillna(0)
         bonus = pd.Series(0.0, index=a.index)
@@ -41,6 +50,7 @@ class MetricsCalculator:
         df["bbpct_val"] = np.where(df["pa_val"] > 0, df["bb_val"] / df["pa_val"], 0)
         df["kpct_val"] = np.where(df["pa_val"] > 0, df["k_val"] / df["pa_val"], 0)
         df["sb_rate_val"] = np.where(df["pa_val"] > 0, df["sb_val"] / df["pa_val"], 0)
+        df["discipline_score"] = df["bbpct_val"] * 1.2 - df["kpct_val"] * 1.0
 
         df["offense_score"] = (
             df["obp_val"] * 3.3
@@ -67,6 +77,63 @@ class MetricsCalculator:
             + df["gap_pot"] * 0.10
         )
 
+        df["vsr_contact_val"] = self.transformer.num_alias(df, ["vsr_contact"])
+        df["vsr_power_val"] = self.transformer.num_alias(df, ["vsr_power"])
+        df["vsr_eye_val"] = self.transformer.num_alias(df, ["vsr_eye"])
+        df["vsl_contact_val"] = self.transformer.num_alias(df, ["vsl_contact"])
+        df["vsl_power_val"] = self.transformer.num_alias(df, ["vsl_power"])
+        df["vsl_eye_val"] = self.transformer.num_alias(df, ["vsl_eye"])
+
+        df["platoon_skill_rhp"] = (
+            (df["vsr_contact_val"] + df["vsr_power_val"] + df["vsr_eye_val"]) / 3.0 - 50.0
+        ) / 25.0
+        df["platoon_skill_lhp"] = (
+            (df["vsl_contact_val"] + df["vsl_power_val"] + df["vsl_eye_val"]) / 3.0 - 50.0
+        ) / 25.0
+        df["platoon_skill_component"] = (df["platoon_skill_rhp"] + df["platoon_skill_lhp"]) / 2.0
+
+        df["run_speed_val"] = self.transformer.num_alias(df, ["running_speed"])
+        df["run_baserunning_val"] = self.transformer.num_alias(df, ["running_baserunning"])
+        df["run_steal_rate_val"] = self.transformer.num_alias(df, ["running_stealing_rate"])
+        df["running_component"] = (
+            ((df["run_speed_val"] + df["run_baserunning_val"] + df["run_steal_rate_val"]) / 3.0 - 50.0) / 25.0
+        )
+
+        df["field_c_component"] = (
+            (
+                self.transformer.num_alias(df, ["field_c_ability"]) * 0.45
+                + self.transformer.num_alias(df, ["field_c_framing"]) * 0.35
+                + self.transformer.num_alias(df, ["field_c_arm"]) * 0.20
+            )
+            - 50.0
+        ) / 20.0
+        df["field_if_component"] = (
+            (
+                self.transformer.num_alias(df, ["field_if_range"]) * 0.45
+                + self.transformer.num_alias(df, ["field_if_arm"]) * 0.25
+                - self.transformer.num_alias(df, ["field_if_error"]) * 0.30
+            )
+            - 20.0
+        ) / 20.0
+        df["field_of_component"] = (
+            (
+                self.transformer.num_alias(df, ["field_of_range"]) * 0.45
+                + self.transformer.num_alias(df, ["field_of_arm"]) * 0.25
+                - self.transformer.num_alias(df, ["field_of_error"]) * 0.30
+            )
+            - 20.0
+        ) / 20.0
+
+        df["defensive_component"] = np.where(
+            df["is_c"],
+            df["field_c_component"],
+            np.where(
+                df["is_ss"] | df["is_2b"] | df["is_3b"] | df["is_1b"],
+                df["field_if_component"],
+                np.where(df["is_cf"] | df["is_lf"] | df["is_rf"], df["field_of_component"], 0.0),
+            ),
+        )
+
         df["speed_score"] = df["sb_val"] * 0.35 - df["cs_val"] * 0.20 + df["sb_rate_val"] * 5.0
 
         df["scarcity_bonus"] = 0.0
@@ -81,15 +148,34 @@ class MetricsCalculator:
             age_source = age_source.where(age_source != 0, df["age_rating_val"])
         df["age_bonus"] = self.age_projection_bonus(age_source)
 
+        df["hitting_reliability"] = self.reliability_weight(df["pa_val"], k=180)
+        offense_baseline = float(df["offense_score"].median()) if not df.empty else 0.0
+        df["offense_score_regressed"] = self.regress_to_baseline(
+            df["offense_score"],
+            offense_baseline,
+            df["hitting_reliability"],
+        )
+        df["discipline_component"] = df["discipline_score"] * self.reliability_weight(df["pa_val"], k=120) * 4.0
+
         df["overall_hitter_score"] = (
-            df["offense_score"] * 0.65 + df["ratings_hitter_now"] * 0.25 + df["scarcity_bonus"] * 0.45
+            df["offense_score_regressed"] * 0.60
+            + df["ratings_hitter_now"] * 0.22
+            + df["scarcity_bonus"] * 0.40
+            + df["discipline_component"] * 0.8
+            + df["platoon_skill_component"] * 0.6
+            + df["defensive_component"] * 0.5
+            + df["running_component"] * 0.25
         )
 
         df["projection_hitter_score"] = (
-            df["offense_score"] * 0.35
-            + df["ratings_hitter_now"] * 0.30
-            + df["ratings_hitter_future"] * 0.35
+            df["offense_score_regressed"] * 0.28
+            + df["ratings_hitter_now"] * 0.27
+            + df["ratings_hitter_future"] * 0.34
             + df["age_bonus"] * 0.5
+            + df["discipline_component"] * 0.9
+            + df["platoon_skill_component"] * 0.7
+            + df["defensive_component"] * 0.35
+            + df["running_component"] * 0.2
         )
 
         bats = df["bats"].fillna("").astype(str).str.upper().str.strip()
@@ -97,8 +183,10 @@ class MetricsCalculator:
         is_right = bats.isin(["R", "RIGHT"])
         is_switch = bats.isin(["S", "SWITCH"])
 
-        df["split_bonus_rhp"] = np.where(is_left, 0.60, np.where(is_switch, 0.26, -0.16))
-        df["split_bonus_lhp"] = np.where(is_right, 0.60, np.where(is_switch, 0.26, -0.16))
+        handedness_split_rhp = np.where(is_left, 0.60, np.where(is_switch, 0.26, -0.16))
+        handedness_split_lhp = np.where(is_right, 0.60, np.where(is_switch, 0.26, -0.16))
+        df["split_bonus_rhp"] = handedness_split_rhp + df["platoon_skill_rhp"] * 0.22
+        df["split_bonus_lhp"] = handedness_split_lhp + df["platoon_skill_lhp"] * 0.22
 
         df["vs_rhp_score"] = df["overall_hitter_score"] + df["split_bonus_rhp"]
         df["vs_lhp_score"] = df["overall_hitter_score"] + df["split_bonus_lhp"]
@@ -178,18 +266,26 @@ class MetricsCalculator:
         df["k_val"] = self.transformer.num_alias(df, ["k", "so", "strikeouts"])
         df["bb_val"] = self.transformer.num_alias(df, ["bb", "walks"])
         df["hr_val"] = self.transformer.num_alias(df, ["hr", "home_runs_allowed"])
+        df["gb_val"] = self.transformer.num_alias(df, ["gb", "ground_balls"])
+        df["fb_val"] = self.transformer.num_alias(df, ["fb", "fly_balls", "gf"])
 
         df["k_9_val"] = np.where(df["ip_val"] > 0, df["k_val"] * 9 / df["ip_val"], 0)
         df["bb_9_val"] = np.where(df["ip_val"] > 0, df["bb_val"] * 9 / df["ip_val"], 0)
         df["hr_9_val"] = np.where(df["ip_val"] > 0, df["hr_val"] * 9 / df["ip_val"], 0)
+        df["k_bb_9_val"] = df["k_9_val"] - df["bb_9_val"]
+        df["gb_share_val"] = np.where((df["gb_val"] + df["fb_val"]) > 0, df["gb_val"] / (df["gb_val"] + df["fb_val"]), 0)
+
+        starter_profile = ((df["gs_val"] >= 3) | (df["stamina_now"] >= 55)).astype(float)
+        starter_sample_scale = np.clip(df["ip_val"] / 60.0, 0.0, 1.0)
+        starter_penalty_scale = 1.0 - starter_profile * (1.0 - starter_sample_scale) * 0.35
 
         df["results_pitcher_score"] = (
-            -df["era_val"] * 2.0
-            + -df["fip_val"] * 2.2
-            + -df["whip_val"] * 1.0
-            + df["k_9_val"] * 0.80
-            + -df["bb_9_val"] * 0.55
-            + -df["hr_9_val"] * 0.40
+            -df["era_val"] * 1.8
+            + -df["fip_val"] * 1.7 * starter_penalty_scale
+            + -df["whip_val"] * 0.9
+            + df["k_9_val"] * 0.85
+            + -df["bb_9_val"] * 0.42 * starter_penalty_scale
+            + -df["hr_9_val"] * 0.35
         )
 
         df["ratings_pitcher_now"] = df["stuff_now"] * 0.45 + df["movement_now"] * 0.25 + df["control_now"] * 0.30
@@ -197,17 +293,68 @@ class MetricsCalculator:
             df["stuff_pot"] * 0.45 + df["movement_pot"] * 0.25 + df["control_pot"] * 0.30
         )
 
+        vsl_mix = (
+            self.transformer.num_alias(df, ["pitch_vsl_stuff"])
+            + self.transformer.num_alias(df, ["pitch_vsl_movement"])
+            + self.transformer.num_alias(df, ["pitch_vsl_control"])
+        )
+        vsr_mix = (
+            self.transformer.num_alias(df, ["pitch_vsr_stuff"])
+            + self.transformer.num_alias(df, ["pitch_vsr_movement"])
+            + self.transformer.num_alias(df, ["pitch_vsr_control"])
+        )
+        df["pitcher_platoon_component"] = ((vsl_mix + vsr_mix) / 6.0 - 50.0) / 25.0
+
+        df["command_dominance_component"] = (
+            df["k_bb_9_val"] * 0.9
+            + df["control_now"] * 0.06
+            + df["stuff_now"] * 0.04
+            + df["pitcher_platoon_component"] * 0.4
+        )
+
+        ground_fly_rating = self.transformer.num_alias(df, ["pitch_ground_fly"])
+        df["contact_management_component"] = (
+            df["gb_share_val"] * 2.0
+            - df["hr_9_val"] * 0.25
+            + df["movement_now"] * 0.03
+            + (ground_fly_rating - 50.0) / 100.0
+        )
+
         age_source = df["age_val"] if "age_val" in df.columns else pd.Series(0, index=df.index)
         if "age_rating_val" in df.columns:
             age_source = age_source.where(age_source != 0, df["age_rating_val"])
         df["age_bonus"] = self.age_projection_bonus(age_source)
 
-        df["score"] = df["results_pitcher_score"] * 0.65 + df["ratings_pitcher_now"] * 0.35
-        df["projection_pitcher_score"] = (
-            df["results_pitcher_score"] * 0.30
+        df["pitching_reliability"] = self.reliability_weight(df["ip_val"], k=45)
+        pitcher_baseline = float(df["results_pitcher_score"].median()) if not df.empty else 0.0
+        df["results_pitcher_score_regressed"] = self.regress_to_baseline(
+            df["results_pitcher_score"],
+            pitcher_baseline,
+            df["pitching_reliability"],
+        )
+
+        stamina_source = np.where(self.transformer.num_alias(df, ["pitch_stamina"]) > 0, self.transformer.num_alias(df, ["pitch_stamina"]), df["stamina_now"])
+        df["durability_component"] = (
+            df["ip_val"] * 0.015
+            + df["gs_val"] * 0.12
+            + np.clip(stamina_source - 50.0, -30.0, 30.0) * 0.03
+        )
+
+        df["score"] = (
+            df["results_pitcher_score_regressed"] * 0.58
             + df["ratings_pitcher_now"] * 0.30
-            + df["ratings_pitcher_future"] * 0.40
+            + df["command_dominance_component"] * 0.20
+            + df["contact_management_component"] * 0.14
+            + df["durability_component"] * 0.12
+        )
+        df["projection_pitcher_score"] = (
+            df["results_pitcher_score_regressed"] * 0.26
+            + df["ratings_pitcher_now"] * 0.24
+            + df["ratings_pitcher_future"] * 0.34
             + df["age_bonus"] * 0.5
+            + df["command_dominance_component"] * 0.22
+            + df["contact_management_component"] * 0.14
+            + df["durability_component"] * 0.10
         )
 
         df["role_score_sp"] = (

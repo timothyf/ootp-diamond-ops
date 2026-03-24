@@ -295,6 +295,8 @@ class MySqlRepository:
                 SUM(COALESCE(pgp.bb, 0)) AS BB,
                 SUM(COALESCE(pgp.k, 0)) AS K,
                 SUM(COALESCE(pgp.hp, 0)) AS HP,
+                SUM(COALESCE(pgp.gb, 0)) AS GB,
+                SUM(COALESCE(pgp.fb, 0)) AS FB,
                 ROUND(9 * SUM(COALESCE(pgp.er, 0)) / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0), 2) AS ERA,
                 ROUND(SUM(COALESCE(pgp.ha, 0)) / NULLIF(SUM(COALESCE(pgp.ab, 0)), 0), 3) AS AVG,
                 ROUND((SUM(COALESCE(pgp.ha, 0)) - SUM(COALESCE(pgp.hra, 0))) / NULLIF(SUM(COALESCE(pgp.ab, 0)) - SUM(COALESCE(pgp.k, 0)) - SUM(COALESCE(pgp.hra, 0)), 0), 3) AS BABIP,
@@ -367,16 +369,72 @@ class MySqlRepository:
                 0 AS YL,
                 0 AS MLY,
                 'Average' AS SctAcc,
-                COALESCE(pb.batting_ratings_overall_contact, pp.pitching_ratings_overall_stuff, 0) AS `CON/STU`,
-                COALESCE(pb.batting_ratings_overall_strikeouts, pp.pitching_ratings_overall_stuff, 0) AS `AVK/STU`,
-                COALESCE(pb.batting_ratings_overall_gap, pp.pitching_ratings_overall_pbabip, 0) AS `BA/PBA`,
-                COALESCE(pb.batting_ratings_overall_power, pp.pitching_ratings_overall_movement, 0) AS `POW/MOV`,
-                COALESCE(pb.batting_ratings_overall_power, pp.pitching_ratings_overall_hra, 0) AS `POW/HRA`,
-                COALESCE(pb.batting_ratings_overall_eye, pp.pitching_ratings_overall_control, 0) AS `EYE/CON`,
-                COALESCE(pp.pitching_ratings_misc_stamina, pf.fielding_ratings_infield_range, 0) AS `FLD/STA`,
-                COALESCE(pb.batting_ratings_talent_contact, pp.pitching_ratings_talent_stuff, 0) AS `CON/STU P`,
-                COALESCE(pb.batting_ratings_talent_power, pp.pitching_ratings_talent_movement, 0) AS `POW/MOV P`,
-                COALESCE(pb.batting_ratings_talent_eye, pp.pitching_ratings_talent_control, 0) AS `EYE/CON P`,
+                CASE
+                    WHEN p.position = 1 THEN COALESCE(pp.pitching_ratings_overall_stuff, 0)
+                    ELSE COALESCE(pb.batting_ratings_overall_contact, 0)
+                END AS `CON/STU`,
+                CASE
+                    WHEN p.position = 1 THEN COALESCE(pp.pitching_ratings_overall_stuff, 0)
+                    ELSE COALESCE(pb.batting_ratings_overall_strikeouts, 0)
+                END AS `AVK/STU`,
+                CASE
+                    WHEN p.position = 1 THEN COALESCE(pp.pitching_ratings_overall_pbabip, 0)
+                    ELSE COALESCE(pb.batting_ratings_overall_gap, 0)
+                END AS `BA/PBA`,
+                CASE
+                    WHEN p.position = 1 THEN COALESCE(pp.pitching_ratings_overall_movement, 0)
+                    ELSE COALESCE(pb.batting_ratings_overall_power, 0)
+                END AS `POW/MOV`,
+                CASE
+                    WHEN p.position = 1 THEN COALESCE(pp.pitching_ratings_overall_hra, 0)
+                    ELSE COALESCE(pb.batting_ratings_overall_power, 0)
+                END AS `POW/HRA`,
+                CASE
+                    WHEN p.position = 1 THEN COALESCE(pp.pitching_ratings_overall_control, 0)
+                    ELSE COALESCE(pb.batting_ratings_overall_eye, 0)
+                END AS `EYE/CON`,
+                CASE
+                    WHEN p.position = 1 THEN COALESCE(pp.pitching_ratings_misc_stamina, 0)
+                    ELSE COALESCE(pf.fielding_ratings_infield_range, 0)
+                END AS `FLD/STA`,
+                CASE
+                    WHEN p.position = 1 THEN COALESCE(pp.pitching_ratings_talent_stuff, 0)
+                    ELSE COALESCE(pb.batting_ratings_talent_contact, 0)
+                END AS `CON/STU P`,
+                CASE
+                    WHEN p.position = 1 THEN COALESCE(pp.pitching_ratings_talent_movement, 0)
+                    ELSE COALESCE(pb.batting_ratings_talent_power, 0)
+                END AS `POW/MOV P`,
+                CASE
+                    WHEN p.position = 1 THEN COALESCE(pp.pitching_ratings_talent_control, 0)
+                    ELSE COALESCE(pb.batting_ratings_talent_eye, 0)
+                END AS `EYE/CON P`,
+                COALESCE(pb.batting_ratings_vsl_contact, 0) AS vsl_contact,
+                COALESCE(pb.batting_ratings_vsl_power, 0) AS vsl_power,
+                COALESCE(pb.batting_ratings_vsl_eye, 0) AS vsl_eye,
+                COALESCE(pb.batting_ratings_vsr_contact, 0) AS vsr_contact,
+                COALESCE(pb.batting_ratings_vsr_power, 0) AS vsr_power,
+                COALESCE(pb.batting_ratings_vsr_eye, 0) AS vsr_eye,
+                COALESCE(pb.running_ratings_speed, 0) AS running_speed,
+                COALESCE(pb.running_ratings_baserunning, 0) AS running_baserunning,
+                COALESCE(pb.running_ratings_stealing_rate, 0) AS running_stealing_rate,
+                COALESCE(pf.fielding_ratings_catcher_ability, 0) AS field_c_ability,
+                COALESCE(pf.fielding_ratings_catcher_arm, 0) AS field_c_arm,
+                COALESCE(pf.fielding_ratings_catcher_framing, 0) AS field_c_framing,
+                COALESCE(pf.fielding_ratings_infield_range, 0) AS field_if_range,
+                COALESCE(pf.fielding_ratings_infield_arm, 0) AS field_if_arm,
+                COALESCE(pf.fielding_ratings_infield_error, 0) AS field_if_error,
+                COALESCE(pf.fielding_ratings_outfield_range, 0) AS field_of_range,
+                COALESCE(pf.fielding_ratings_outfield_arm, 0) AS field_of_arm,
+                COALESCE(pf.fielding_ratings_outfield_error, 0) AS field_of_error,
+                COALESCE(pp.pitching_ratings_misc_ground_fly, 0) AS pitch_ground_fly,
+                COALESCE(pp.pitching_ratings_vsl_stuff, 0) AS pitch_vsl_stuff,
+                COALESCE(pp.pitching_ratings_vsl_movement, 0) AS pitch_vsl_movement,
+                COALESCE(pp.pitching_ratings_vsl_control, 0) AS pitch_vsl_control,
+                COALESCE(pp.pitching_ratings_vsr_stuff, 0) AS pitch_vsr_stuff,
+                COALESCE(pp.pitching_ratings_vsr_movement, 0) AS pitch_vsr_movement,
+                COALESCE(pp.pitching_ratings_vsr_control, 0) AS pitch_vsr_control,
+                COALESCE(pp.pitching_ratings_misc_stamina, 0) AS pitch_stamina,
                 p.historical_id AS HistID
             FROM players p
             JOIN teams t ON t.team_id = p.team_id
@@ -533,6 +591,36 @@ class PlayerDataTransformer:
         df["control_pot"] = cls.num_alias(df, ["eye_con_p"])
         df["stamina_pot"] = cls.num_alias(df, ["eye_con_p"])
 
+        df["vsl_contact"] = cls.num_alias(df, ["vsl_contact", "batting_ratings_vsl_contact"])
+        df["vsl_power"] = cls.num_alias(df, ["vsl_power", "batting_ratings_vsl_power"])
+        df["vsl_eye"] = cls.num_alias(df, ["vsl_eye", "batting_ratings_vsl_eye"])
+        df["vsr_contact"] = cls.num_alias(df, ["vsr_contact", "batting_ratings_vsr_contact"])
+        df["vsr_power"] = cls.num_alias(df, ["vsr_power", "batting_ratings_vsr_power"])
+        df["vsr_eye"] = cls.num_alias(df, ["vsr_eye", "batting_ratings_vsr_eye"])
+
+        df["running_speed"] = cls.num_alias(df, ["running_speed", "running_ratings_speed"])
+        df["running_baserunning"] = cls.num_alias(df, ["running_baserunning", "running_ratings_baserunning"])
+        df["running_stealing_rate"] = cls.num_alias(df, ["running_stealing_rate", "running_ratings_stealing_rate"])
+
+        df["field_c_ability"] = cls.num_alias(df, ["field_c_ability", "fielding_ratings_catcher_ability"])
+        df["field_c_arm"] = cls.num_alias(df, ["field_c_arm", "fielding_ratings_catcher_arm"])
+        df["field_c_framing"] = cls.num_alias(df, ["field_c_framing", "fielding_ratings_catcher_framing"])
+        df["field_if_range"] = cls.num_alias(df, ["field_if_range", "fielding_ratings_infield_range"])
+        df["field_if_arm"] = cls.num_alias(df, ["field_if_arm", "fielding_ratings_infield_arm"])
+        df["field_if_error"] = cls.num_alias(df, ["field_if_error", "fielding_ratings_infield_error"])
+        df["field_of_range"] = cls.num_alias(df, ["field_of_range", "fielding_ratings_outfield_range"])
+        df["field_of_arm"] = cls.num_alias(df, ["field_of_arm", "fielding_ratings_outfield_arm"])
+        df["field_of_error"] = cls.num_alias(df, ["field_of_error", "fielding_ratings_outfield_error"])
+
+        df["pitch_ground_fly"] = cls.num_alias(df, ["pitch_ground_fly", "pitching_ratings_misc_ground_fly"])
+        df["pitch_vsl_stuff"] = cls.num_alias(df, ["pitch_vsl_stuff", "pitching_ratings_vsl_stuff"])
+        df["pitch_vsl_movement"] = cls.num_alias(df, ["pitch_vsl_movement", "pitching_ratings_vsl_movement"])
+        df["pitch_vsl_control"] = cls.num_alias(df, ["pitch_vsl_control", "pitching_ratings_vsl_control"])
+        df["pitch_vsr_stuff"] = cls.num_alias(df, ["pitch_vsr_stuff", "pitching_ratings_vsr_stuff"])
+        df["pitch_vsr_movement"] = cls.num_alias(df, ["pitch_vsr_movement", "pitching_ratings_vsr_movement"])
+        df["pitch_vsr_control"] = cls.num_alias(df, ["pitch_vsr_control", "pitching_ratings_vsr_control"])
+        df["pitch_stamina"] = cls.num_alias(df, ["pitch_stamina", "pitching_ratings_misc_stamina"])
+
         age_series = cls.num_alias(df, ["age"])
         df["age_rating_val"] = age_series if (age_series != 0).any() else 0
         return df
@@ -560,6 +648,32 @@ class PlayerDataTransformer:
             "stamina_now",
             "stamina_pot",
             "age_rating_val",
+            "vsl_contact",
+            "vsl_power",
+            "vsl_eye",
+            "vsr_contact",
+            "vsr_power",
+            "vsr_eye",
+            "running_speed",
+            "running_baserunning",
+            "running_stealing_rate",
+            "field_c_ability",
+            "field_c_arm",
+            "field_c_framing",
+            "field_if_range",
+            "field_if_arm",
+            "field_if_error",
+            "field_of_range",
+            "field_of_arm",
+            "field_of_error",
+            "pitch_ground_fly",
+            "pitch_vsl_stuff",
+            "pitch_vsl_movement",
+            "pitch_vsl_control",
+            "pitch_vsr_stuff",
+            "pitch_vsr_movement",
+            "pitch_vsr_control",
+            "pitch_stamina",
         ]
         cols = [c for c in cols if c in players_df.columns]
         return team_df.merge(players_df[cols], on="player_key", how="left")
