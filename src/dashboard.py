@@ -311,7 +311,7 @@ class DashboardGenerator:
   <main class="page">
     <section class="hero">
       <h1>{escape(title)}</h1>
-      <p>Static OOTP front office output generated from the latest roster, stats, ratings, lineup, pitching, and transaction recommendations.</p>
+      <h3>Baseball Operations Dashboard for OOTP</h3>
     </section>
     {nav}
     {body}
@@ -376,7 +376,7 @@ class DashboardGenerator:
         </section>
         """
         (self.out_dir / "dashboard.html").write_text(
-            self._html_shell("OOTP GM Dashboard", dashboard_body, active_page="dashboard"),
+            self._html_shell("OOTP DiamondOps", dashboard_body, active_page="dashboard"),
             encoding="utf-8",
         )
 
@@ -583,7 +583,7 @@ class DashboardGenerator:
         outputs.recommended_transactions.to_csv(self.out_dir / "recommended_transactions.csv", index=False)
         outputs.platoon_diagnostics.to_csv(self.out_dir / "platoon_diagnostics.csv", index=False)
 
-        report = f"""# OOTP GM Dashboard
+        report = f"""# OOTP DiamondOps
 
     ## {self.mlb_team_name} hitters - current value
 {self.md_table(outputs.mlb_hitters_dashboard)}

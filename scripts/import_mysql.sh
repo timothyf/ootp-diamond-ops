@@ -19,6 +19,7 @@ Notes:
   - If the target database already exists, it is dropped and recreated.
   - Tables are imported in dependency-aware order.
   - Foreign keys are applied at the very end from `sql/foreign_keys.mysql.sql`.
+  - During FK import, `restrict_fk_on_non_standard_key` is disabled for compatibility with OOTP exports.
 EOF
 }
 
@@ -193,7 +194,50 @@ echo "Creating database '$DB_NAME'..."
 
 for file in "${SQL_FILES[@]}"; do
   echo "Importing $file"
-  "${MYSQL_CMD[@]}" "$DB_NAME" < "$MYSQL_DIR/$file"
+  if [[ "$file" == "$FK_CENTRAL_FILE" ]]; then
+    # OOTP exports may omit PKs on FK parent tables. Repair them idempotently
+    # before FK import so regenerated dumps still load without manual edits.
+    "${MYSQL_CMD[@]}" "$DB_NAME" <<'SQL'
+SET @has_players_pk := (
+  SELECT COUNT(*)
+  FROM information_schema.table_constraints
+  WHERE table_schema = DATABASE()
+    AND table_name = 'players'
+    AND constraint_type = 'PRIMARY KEY'
+);
+SET @sql := IF(
+  @has_players_pk = 0,
+  'ALTER TABLE `players` ADD PRIMARY KEY (`player_id`)',
+  'DO 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_hm_pk := (
+  SELECT COUNT(*)
+  FROM information_schema.table_constraints
+  WHERE table_schema = DATABASE()
+    AND table_name = 'human_managers'
+    AND constraint_type = 'PRIMARY KEY'
+);
+SET @sql := IF(
+  @has_hm_pk = 0,
+  'ALTER TABLE `human_managers` ADD PRIMARY KEY (`human_manager_id`)',
+  'DO 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+SQL
+
+    {
+      echo "SET SESSION restrict_fk_on_non_standard_key = OFF;"
+      cat "$MYSQL_DIR/$file"
+    } | "${MYSQL_CMD[@]}" "$DB_NAME"
+  else
+    "${MYSQL_CMD[@]}" "$DB_NAME" < "$MYSQL_DIR/$file"
+  fi
 done
 
 echo "Import completed successfully for database '$DB_NAME'."
