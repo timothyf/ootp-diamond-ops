@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -11,6 +12,381 @@ class CsvRepository:
 
     def load(self, name: str) -> pd.DataFrame:
         return pd.read_csv(self.data_dir / name, low_memory=False)
+
+
+class MySqlRepository:
+    """Load dashboard input frames from a MySQL database.
+
+    This class provides a minimal query layer that returns the same logical
+    datasets currently expected from CSV files in the dashboard flow.
+    """
+
+    def __init__(
+            self,
+            connection_url: str,
+            mlb_team_name: str = "Detroit Tigers",
+            aaa_team_name: str = "Toledo Mud Hens",
+    ) -> None:
+            self.connection_url = connection_url
+            self.mlb_team_name = mlb_team_name
+            self.aaa_team_name = aaa_team_name
+
+            try:
+                    from sqlalchemy import create_engine
+            except ImportError as exc:
+                    raise ImportError(
+                            "MySqlRepository requires SQLAlchemy. Install with: pip install sqlalchemy pymysql"
+                    ) from exc
+
+            self._engine = create_engine(connection_url)
+            self._query_map = {
+                    "tigers_roster.csv": lambda: self._build_roster(self.mlb_team_name),
+                    "toledo_roster.csv": lambda: self._build_roster(self.aaa_team_name),
+                    "tigers_batting.csv": lambda: self._build_batting(self.mlb_team_name),
+                    "toledo_batting.csv": lambda: self._build_batting(self.aaa_team_name),
+                    "tigers_pitching.csv": lambda: self._build_pitching(self.mlb_team_name),
+                    "toledo_pitching.csv": lambda: self._build_pitching(self.aaa_team_name),
+                    "player_ratings.csv": self._build_player_ratings,
+            }
+
+    def smoke_check(self) -> None:
+        """Verify DB connectivity and that all required tables are present.
+
+        Raises RuntimeError with a descriptive message if any check fails.
+        """
+        required_tables = [
+            "players",
+            "teams",
+            "players_batting",
+            "players_pitching",
+            "players_fielding",
+            "players_game_batting",
+            "players_game_pitching_stats",
+            "players_career_batting_stats",
+            "players_career_pitching_stats",
+            "players_roster_status",
+            "team_roster",
+        ]
+        from sqlalchemy import text
+
+        try:
+            with self._engine.connect() as conn:
+                rows = conn.execute(text("SHOW TABLES")).fetchall()
+        except Exception as exc:
+            raise RuntimeError(f"DB connection failed: {exc}") from exc
+
+        existing = {r[0].lower() for r in rows}
+        missing = [t for t in required_tables if t.lower() not in existing]
+        if missing:
+            raise RuntimeError(
+                f"DB smoke-check failed — missing tables: {', '.join(missing)}"
+            )
+
+    def _read_sql(self, sql: str, params: dict[str, Any]) -> pd.DataFrame:
+            from sqlalchemy import text
+            return pd.read_sql_query(text(sql), self._engine, params=params)
+
+    def load(self, name: str) -> pd.DataFrame:
+            builder = self._query_map.get(name)
+            if builder is None:
+                    raise ValueError(f"Unsupported dataset '{name}' for MySqlRepository")
+            return builder()
+
+    def _build_roster(self, team_name: str) -> pd.DataFrame:
+            sql = """
+            SELECT
+                CASE
+                    WHEN p.position = 1 THEN
+                        CASE
+                            WHEN p.role = 1 THEN 'SP'
+                            WHEN p.role = 2 THEN 'RP'
+                            WHEN p.role = 3 THEN 'CL'
+                            ELSE 'P'
+                        END
+                    WHEN p.position = 2 THEN 'C'
+                    WHEN p.position = 3 THEN '1B'
+                    WHEN p.position = 4 THEN '2B'
+                    WHEN p.position = 5 THEN '3B'
+                    WHEN p.position = 6 THEN 'SS'
+                    WHEN p.position = 7 THEN 'LF'
+                    WHEN p.position = 8 THEN 'CF'
+                    WHEN p.position = 9 THEN 'RF'
+                    ELSE ''
+                END AS POS,
+                p.uniform_number AS `#`,
+                TRIM(CONCAT(COALESCE(p.first_name, ''), ' ', COALESCE(p.last_name, ''))) AS Name,
+                '' AS Inf,
+                p.age AS Age,
+                CASE
+                    WHEN p.bats = 1 THEN 'Left'
+                    WHEN p.bats = 2 THEN 'Right'
+                    WHEN p.bats = 3 THEN 'Switch'
+                    ELSE ''
+                END AS B,
+                CASE
+                    WHEN p.throws = 1 THEN 'Left'
+                    WHEN p.throws = 2 THEN 'Right'
+                    ELSE ''
+                END AS T,
+                CASE WHEN COALESCE(p.injury_is_injured, 0) = 1 THEN 'Injured' ELSE '-' END AS INJ,
+                CASE
+                    WHEN COALESCE(p.injury_is_injured, 0) = 1 THEN CONCAT('Out ', COALESCE(p.injury_left, 0), ' days')
+                    ELSE '-'
+                END AS INJ_1,
+                CASE
+                    WHEN COALESCE(prs.is_on_dl, 0) = 1 OR COALESCE(prs.is_on_dl60, 0) = 1 THEN 'Injured List'
+                    WHEN COALESCE(prs.is_active, 0) = 1 THEN 'Active'
+                    ELSE 'Reserve'
+                END AS Status
+            FROM players p
+            JOIN teams t ON t.team_id = p.team_id
+            LEFT JOIN players_roster_status prs ON prs.player_id = p.player_id AND prs.team_id = p.team_id
+            WHERE CONCAT(t.name, ' ', t.nickname) = :team_name
+                AND COALESCE(p.retired, 0) = 0
+            ORDER BY Name
+            """
+            return self._read_sql(sql, {"team_name": team_name})
+
+    def _build_batting(self, team_name: str) -> pd.DataFrame:
+            sql = """
+            WITH latest AS (
+                SELECT MAX(year) AS year_val FROM players_game_batting
+            ),
+            war AS (
+                SELECT pcs.player_id, SUM(COALESCE(pcs.war, 0)) AS war_total
+                FROM players_career_batting_stats pcs
+                JOIN latest l ON pcs.year = l.year_val
+                WHERE pcs.split_id = 1
+                GROUP BY pcs.player_id
+            )
+            SELECT
+                CASE
+                    WHEN p.position = 2 THEN 'C'
+                    WHEN p.position = 3 THEN '1B'
+                    WHEN p.position = 4 THEN '2B'
+                    WHEN p.position = 5 THEN '3B'
+                    WHEN p.position = 6 THEN 'SS'
+                    WHEN p.position = 7 THEN 'LF'
+                    WHEN p.position = 8 THEN 'CF'
+                    WHEN p.position = 9 THEN 'RF'
+                    ELSE 'DH'
+                END AS POS,
+                p.uniform_number AS `#`,
+                TRIM(CONCAT(COALESCE(p.first_name, ''), ' ', COALESCE(p.last_name, ''))) AS Name,
+                '' AS Inf,
+                CASE WHEN p.bats = 1 THEN 'L' WHEN p.bats = 2 THEN 'R' WHEN p.bats = 3 THEN 'S' ELSE '' END AS B,
+                CASE WHEN p.throws = 1 THEN 'L' WHEN p.throws = 2 THEN 'R' ELSE '' END AS T,
+                COUNT(*) AS G,
+                SUM(COALESCE(pgb.pa, 0)) AS PA,
+                SUM(COALESCE(pgb.ab, 0)) AS AB,
+                SUM(COALESCE(pgb.h, 0)) AS H,
+                SUM(COALESCE(pgb.d, 0)) AS `2B`,
+                SUM(COALESCE(pgb.t, 0)) AS `3B`,
+                SUM(COALESCE(pgb.hr, 0)) AS HR,
+                SUM(COALESCE(pgb.rbi, 0)) AS RBI,
+                SUM(COALESCE(pgb.r, 0)) AS R,
+                SUM(COALESCE(pgb.bb, 0)) AS BB,
+                SUM(COALESCE(pgb.ibb, 0)) AS IBB,
+                SUM(COALESCE(pgb.hp, 0)) AS HP,
+                SUM(COALESCE(pgb.k, 0)) AS K,
+                SUM(COALESCE(pgb.gdp, 0)) AS GIDP,
+                ROUND(SUM(COALESCE(pgb.h, 0)) / NULLIF(SUM(COALESCE(pgb.ab, 0)), 0), 3) AS AVG,
+                ROUND(
+                    (SUM(COALESCE(pgb.h, 0)) + SUM(COALESCE(pgb.bb, 0)) + SUM(COALESCE(pgb.hp, 0)))
+                    / NULLIF(SUM(COALESCE(pgb.ab, 0)) + SUM(COALESCE(pgb.bb, 0)) + SUM(COALESCE(pgb.hp, 0)) + SUM(COALESCE(pgb.sf, 0)), 0),
+                    3
+                ) AS OBP,
+                ROUND(
+                    (
+                        SUM(COALESCE(pgb.h, 0) - COALESCE(pgb.d, 0) - COALESCE(pgb.t, 0) - COALESCE(pgb.hr, 0))
+                        + 2 * SUM(COALESCE(pgb.d, 0))
+                        + 3 * SUM(COALESCE(pgb.t, 0))
+                        + 4 * SUM(COALESCE(pgb.hr, 0))
+                    ) / NULLIF(SUM(COALESCE(pgb.ab, 0)), 0),
+                    3
+                ) AS SLG,
+                ROUND(
+                    (
+                        (
+                            SUM(COALESCE(pgb.h, 0) - COALESCE(pgb.d, 0) - COALESCE(pgb.t, 0) - COALESCE(pgb.hr, 0))
+                            + 2 * SUM(COALESCE(pgb.d, 0))
+                            + 3 * SUM(COALESCE(pgb.t, 0))
+                            + 4 * SUM(COALESCE(pgb.hr, 0))
+                        ) / NULLIF(SUM(COALESCE(pgb.ab, 0)), 0)
+                    )
+                    - (SUM(COALESCE(pgb.h, 0)) / NULLIF(SUM(COALESCE(pgb.ab, 0)), 0)),
+                    3
+                ) AS ISO,
+                ROUND(
+                    (
+                        (SUM(COALESCE(pgb.h, 0)) + SUM(COALESCE(pgb.bb, 0)) + SUM(COALESCE(pgb.hp, 0)))
+                        / NULLIF(SUM(COALESCE(pgb.ab, 0)) + SUM(COALESCE(pgb.bb, 0)) + SUM(COALESCE(pgb.hp, 0)) + SUM(COALESCE(pgb.sf, 0)), 0)
+                    )
+                    +
+                    (
+                        (
+                            SUM(COALESCE(pgb.h, 0) - COALESCE(pgb.d, 0) - COALESCE(pgb.t, 0) - COALESCE(pgb.hr, 0))
+                            + 2 * SUM(COALESCE(pgb.d, 0))
+                            + 3 * SUM(COALESCE(pgb.t, 0))
+                            + 4 * SUM(COALESCE(pgb.hr, 0))
+                        ) / NULLIF(SUM(COALESCE(pgb.ab, 0)), 0)
+                    ),
+                    3
+                ) AS OPS,
+                100 AS `OPS+`,
+                ROUND(
+                    (SUM(COALESCE(pgb.h, 0)) - SUM(COALESCE(pgb.hr, 0)))
+                    / NULLIF(SUM(COALESCE(pgb.ab, 0)) - SUM(COALESCE(pgb.k, 0)) - SUM(COALESCE(pgb.hr, 0)) + SUM(COALESCE(pgb.sf, 0)), 0),
+                    3
+                ) AS BABIP,
+                ROUND(COALESCE(w.war_total, 0), 1) AS WAR,
+                SUM(COALESCE(pgb.sb, 0)) AS SB,
+                SUM(COALESCE(pgb.cs, 0)) AS CS
+            FROM players_game_batting pgb
+            JOIN latest l ON pgb.year = l.year_val
+            JOIN players p ON p.player_id = pgb.player_id
+            JOIN teams t ON t.team_id = pgb.team_id
+            LEFT JOIN war w ON w.player_id = pgb.player_id
+            WHERE CONCAT(t.name, ' ', t.nickname) = :team_name
+            GROUP BY p.player_id, p.uniform_number, p.first_name, p.last_name, p.position, p.bats, p.throws, w.war_total
+            ORDER BY PA DESC, Name
+            """
+            return self._read_sql(sql, {"team_name": team_name})
+
+    def _build_pitching(self, team_name: str) -> pd.DataFrame:
+            sql = """
+            WITH latest AS (
+                SELECT MAX(year) AS year_val FROM players_game_pitching_stats
+            ),
+            war AS (
+                SELECT pcs.player_id, SUM(COALESCE(pcs.war, 0)) AS war_total
+                FROM players_career_pitching_stats pcs
+                JOIN latest l ON pcs.year = l.year_val
+                WHERE pcs.split_id = 1
+                GROUP BY pcs.player_id
+            )
+            SELECT
+                CASE
+                    WHEN p.position = 1 THEN
+                        CASE
+                            WHEN p.role = 1 THEN 'SP'
+                            WHEN p.role = 2 THEN 'RP'
+                            WHEN p.role = 3 THEN 'CL'
+                            ELSE 'P'
+                        END
+                    ELSE 'P'
+                END AS POS,
+                p.uniform_number AS `#`,
+                TRIM(CONCAT(COALESCE(p.first_name, ''), ' ', COALESCE(p.last_name, ''))) AS Name,
+                '' AS Inf,
+                CASE WHEN p.bats = 1 THEN 'L' WHEN p.bats = 2 THEN 'R' WHEN p.bats = 3 THEN 'S' ELSE '' END AS B,
+                CASE WHEN p.throws = 1 THEN 'L' WHEN p.throws = 2 THEN 'R' ELSE '' END AS T,
+                SUM(COALESCE(pgp.g, 0)) AS G,
+                SUM(COALESCE(pgp.gs, 0)) AS GS,
+                SUM(COALESCE(pgp.w, 0)) AS W,
+                SUM(COALESCE(pgp.l, 0)) AS L,
+                SUM(COALESCE(pgp.s, 0)) AS SV,
+                SUM(COALESCE(pgp.hld, 0)) AS HLD,
+                ROUND(SUM(COALESCE(pgp.ip, 0)), 1) AS IP,
+                SUM(COALESCE(pgp.ha, 0)) AS HA,
+                SUM(COALESCE(pgp.hra, 0)) AS HR,
+                SUM(COALESCE(pgp.r, 0)) AS R,
+                SUM(COALESCE(pgp.er, 0)) AS ER,
+                SUM(COALESCE(pgp.bb, 0)) AS BB,
+                SUM(COALESCE(pgp.k, 0)) AS K,
+                SUM(COALESCE(pgp.hp, 0)) AS HP,
+                ROUND(9 * SUM(COALESCE(pgp.er, 0)) / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0), 2) AS ERA,
+                ROUND(SUM(COALESCE(pgp.ha, 0)) / NULLIF(SUM(COALESCE(pgp.ab, 0)), 0), 3) AS AVG,
+                ROUND((SUM(COALESCE(pgp.ha, 0)) - SUM(COALESCE(pgp.hra, 0))) / NULLIF(SUM(COALESCE(pgp.ab, 0)) - SUM(COALESCE(pgp.k, 0)) - SUM(COALESCE(pgp.hra, 0)), 0), 3) AS BABIP,
+                ROUND((SUM(COALESCE(pgp.ha, 0)) + SUM(COALESCE(pgp.bb, 0))) / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0), 2) AS WHIP,
+                ROUND(9 * SUM(COALESCE(pgp.hra, 0)) / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0), 1) AS `HR/9`,
+                ROUND(9 * SUM(COALESCE(pgp.bb, 0)) / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0), 1) AS `BB/9`,
+                ROUND(9 * SUM(COALESCE(pgp.k, 0)) / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0), 1) AS `K/9`,
+                ROUND(SUM(COALESCE(pgp.k, 0)) / NULLIF(SUM(COALESCE(pgp.bb, 0)), 0), 1) AS `K/BB`,
+                100 AS `ERA+`,
+                ROUND(
+                    ((13 * SUM(COALESCE(pgp.hra, 0))) + (3 * SUM(COALESCE(pgp.bb, 0))) - (2 * SUM(COALESCE(pgp.k, 0))))
+                    / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0)
+                    + 3.20,
+                    2
+                ) AS FIP,
+                ROUND(COALESCE(w.war_total, 0), 1) AS WAR
+            FROM players_game_pitching_stats pgp
+            JOIN latest l ON pgp.year = l.year_val
+            JOIN players p ON p.player_id = pgp.player_id
+            JOIN teams t ON t.team_id = pgp.team_id
+            LEFT JOIN war w ON w.player_id = pgp.player_id
+            WHERE CONCAT(t.name, ' ', t.nickname) = :team_name
+            GROUP BY p.player_id, p.uniform_number, p.first_name, p.last_name, p.position, p.role, p.bats, p.throws, w.war_total
+            ORDER BY IP DESC, Name
+            """
+            return self._read_sql(sql, {"team_name": team_name})
+
+    def _build_player_ratings(self) -> pd.DataFrame:
+            sql = """
+            SELECT
+                CASE
+                    WHEN p.position = 1 THEN
+                        CASE
+                            WHEN p.role = 1 THEN 'SP'
+                            WHEN p.role = 2 THEN 'RP'
+                            WHEN p.role = 3 THEN 'CL'
+                            ELSE 'P'
+                        END
+                    WHEN p.position = 2 THEN 'C'
+                    WHEN p.position = 3 THEN '1B'
+                    WHEN p.position = 4 THEN '2B'
+                    WHEN p.position = 5 THEN '3B'
+                    WHEN p.position = 6 THEN 'SS'
+                    WHEN p.position = 7 THEN 'LF'
+                    WHEN p.position = 8 THEN 'CF'
+                    WHEN p.position = 9 THEN 'RF'
+                    ELSE ''
+                END AS POS,
+                p.uniform_number AS `#`,
+                TRIM(CONCAT(COALESCE(p.first_name, ''), ' ', COALESCE(p.last_name, ''))) AS Name,
+                p.first_name AS `First Name`,
+                p.last_name AS `Last Name`,
+                '' AS Inf,
+                t.nickname AS TM,
+                org.nickname AS ORG,
+                p.date_of_birth AS DOB,
+                p.age AS Age,
+                '' AS NAT,
+                CASE WHEN p.bats = 1 THEN 'Left' WHEN p.bats = 2 THEN 'Right' WHEN p.bats = 3 THEN 'Switch' ELSE '' END AS B,
+                CASE WHEN p.throws = 1 THEN 'Left' WHEN p.throws = 2 THEN 'Right' ELSE '' END AS T,
+                '' AS OVR,
+                '' AS POT,
+                CASE WHEN COALESCE(p.injury_is_injured, 0) = 1 THEN 'Injured' ELSE '-' END AS INJ,
+                CASE
+                    WHEN COALESCE(p.injury_is_injured, 0) = 1 THEN CONCAT('Out ', COALESCE(p.injury_left, 0), ' days')
+                    ELSE '-'
+                END AS INJ_1,
+                '-' AS `Left`,
+                '-' AS SLR,
+                0 AS YL,
+                0 AS MLY,
+                'Average' AS SctAcc,
+                COALESCE(pb.batting_ratings_overall_contact, pp.pitching_ratings_overall_stuff, 0) AS `CON/STU`,
+                COALESCE(pb.batting_ratings_overall_strikeouts, pp.pitching_ratings_overall_stuff, 0) AS `AVK/STU`,
+                COALESCE(pb.batting_ratings_overall_gap, pp.pitching_ratings_overall_pbabip, 0) AS `BA/PBA`,
+                COALESCE(pb.batting_ratings_overall_power, pp.pitching_ratings_overall_movement, 0) AS `POW/MOV`,
+                COALESCE(pb.batting_ratings_overall_power, pp.pitching_ratings_overall_hra, 0) AS `POW/HRA`,
+                COALESCE(pb.batting_ratings_overall_eye, pp.pitching_ratings_overall_control, 0) AS `EYE/CON`,
+                COALESCE(pp.pitching_ratings_misc_stamina, pf.fielding_ratings_infield_range, 0) AS `FLD/STA`,
+                COALESCE(pb.batting_ratings_talent_contact, pp.pitching_ratings_talent_stuff, 0) AS `CON/STU P`,
+                COALESCE(pb.batting_ratings_talent_power, pp.pitching_ratings_talent_movement, 0) AS `POW/MOV P`,
+                COALESCE(pb.batting_ratings_talent_eye, pp.pitching_ratings_talent_control, 0) AS `EYE/CON P`,
+                p.historical_id AS HistID
+            FROM players p
+            JOIN teams t ON t.team_id = p.team_id
+            LEFT JOIN teams org ON org.team_id = p.organization_id
+            LEFT JOIN players_batting pb ON pb.player_id = p.player_id AND pb.team_id = p.team_id
+            LEFT JOIN players_pitching pp ON pp.player_id = p.player_id AND pp.team_id = p.team_id
+            LEFT JOIN players_fielding pf ON pf.player_id = p.player_id AND pf.team_id = p.team_id
+            WHERE COALESCE(p.retired, 0) = 0
+            """
+            return self._read_sql(sql, {})
 
 
 class PlayerDataTransformer:

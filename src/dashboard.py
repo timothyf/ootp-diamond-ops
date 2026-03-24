@@ -41,6 +41,16 @@ class DashboardGenerator:
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(exist_ok=True)
 
+        self.mlb_batting_filename = "tigers_batting.csv"
+        self.mlb_pitching_filename = "tigers_pitching.csv"
+        self.mlb_roster_filename = "tigers_roster.csv"
+        self.mlb_team_name = self._team_name_from_filename(self.mlb_batting_filename)
+
+        self.aaa_batting_filename = "toledo_batting.csv"
+        self.aaa_pitching_filename = "toledo_pitching.csv"
+        self.aaa_roster_filename = "toledo_roster.csv"
+        self.aaa_team_name = self._team_name_from_filename(self.aaa_batting_filename)
+
         self.repository = repository or CsvRepository(self.data_dir)
         self.transformer = transformer or PlayerDataTransformer()
         self.metrics = metrics or MetricsCalculator(self.transformer)
@@ -69,13 +79,40 @@ class DashboardGenerator:
         )
 
     @staticmethod
-    def _html_shell(title: str, body: str, active_page: str | None = None) -> str:
+    def _team_name_from_filename(filename: str) -> str:
+        stem = Path(filename).stem
+        base = stem.rsplit("_", 1)[0] if "_" in stem else stem
+        name = base.replace("_", " ").replace("-", " ").strip()
+        return name.title() if name else "MLB"
+
+    def _html_shell(self, title: str, body: str, active_page: str | None = None) -> str:
+        mlb_hitters_slug = self._slugify(f"{self.mlb_team_name} hitters - current value")
+        mlb_pitchers_slug = self._slugify(f"{self.mlb_team_name} pitchers - current value")
+        aaa_hitters_slug = self._slugify(f"{self.aaa_team_name} hitters - promotion board")
+        aaa_pitchers_slug = self._slugify(f"{self.aaa_team_name} pitchers - promotion board")
+
         nav_items = [
             ("dashboard", "dashboard.html", "Dashboard"),
-            ("mlb_hitters_current_value", "mlb_hitters_current_value.html", "MLB Hitters"),
-            ("mlb_pitchers_current_value", "mlb_pitchers_current_value.html", "MLB Pitchers"),
-            ("aaa_hitters_promotion_board", "aaa_hitters_promotion_board.html", "AAA Hitters"),
-            ("aaa_pitchers_promotion_board", "aaa_pitchers_promotion_board.html", "AAA Pitchers"),
+            (
+                mlb_hitters_slug,
+                f"{mlb_hitters_slug}.html",
+                f"{self.mlb_team_name} Hitters",
+            ),
+            (
+                mlb_pitchers_slug,
+                f"{mlb_pitchers_slug}.html",
+                f"{self.mlb_team_name} Pitchers",
+            ),
+            (
+                aaa_hitters_slug,
+                f"{aaa_hitters_slug}.html",
+                f"{self.aaa_team_name} Hitters",
+            ),
+            (
+                aaa_pitchers_slug,
+                f"{aaa_pitchers_slug}.html",
+                f"{self.aaa_team_name} Pitchers",
+            ),
             ("recommended_transactions", "recommended_transactions.html", "Transactions"),
         ]
         nav_links = "".join(
@@ -285,10 +322,10 @@ class DashboardGenerator:
 
     def _output_sections(self, outputs: DashboardOutputs) -> list[tuple[str, pd.DataFrame]]:
         return [
-            ("MLB hitters - current value", outputs.mlb_hitters_dashboard),
-            ("MLB pitchers - current value", outputs.mlb_pitchers_dashboard),
-            ("AAA hitters - promotion board", outputs.aaa_hitters_dashboard),
-            ("AAA pitchers - promotion board", outputs.aaa_pitchers_dashboard),
+        (f"{self.mlb_team_name} hitters - current value", outputs.mlb_hitters_dashboard),
+        (f"{self.mlb_team_name} pitchers - current value", outputs.mlb_pitchers_dashboard),
+        (f"{self.aaa_team_name} hitters - promotion board", outputs.aaa_hitters_dashboard),
+        (f"{self.aaa_team_name} pitchers - promotion board", outputs.aaa_pitchers_dashboard),
             ("Recommended lineup vs RHP", outputs.recommended_lineup_vs_rhp),
             ("Recommended lineup vs LHP", outputs.recommended_lineup_vs_lhp),
             ("Platoon diagnostics", outputs.platoon_diagnostics),
@@ -301,10 +338,10 @@ class DashboardGenerator:
         sections = self._output_sections(outputs)
 
         summary_cards = [
-            ("MLB hitters", len(outputs.mlb_hitters_dashboard)),
-            ("MLB pitchers", len(outputs.mlb_pitchers_dashboard)),
-            ("AAA hitters", len(outputs.aaa_hitters_dashboard)),
-            ("AAA pitchers", len(outputs.aaa_pitchers_dashboard)),
+            (f"{self.mlb_team_name} hitters", len(outputs.mlb_hitters_dashboard)),
+            (f"{self.mlb_team_name} pitchers", len(outputs.mlb_pitchers_dashboard)),
+            (f"{self.aaa_team_name} hitters", len(outputs.aaa_hitters_dashboard)),
+            (f"{self.aaa_team_name} pitchers", len(outputs.aaa_pitchers_dashboard)),
             ("Transactions", len(outputs.recommended_transactions)),
             ("Platoon notes", len(outputs.platoon_diagnostics)),
         ]
@@ -366,13 +403,13 @@ class DashboardGenerator:
         return self.transformer.dedupe(df)
 
     def _load_team_frames(self) -> dict[str, pd.DataFrame]:
-        mlb_bat = self._load_named_csv("tigers_batting.csv")
-        mlb_pitch = self._load_named_csv("tigers_pitching.csv")
-        mlb_roster = self.transformer.prep_roster(self._load_named_csv("tigers_roster.csv"))
+        mlb_bat = self._load_named_csv(self.mlb_batting_filename)
+        mlb_pitch = self._load_named_csv(self.mlb_pitching_filename)
+        mlb_roster = self.transformer.prep_roster(self._load_named_csv(self.mlb_roster_filename))
 
-        aaa_bat = self._load_named_csv("toledo_batting.csv")
-        aaa_pitch = self._load_named_csv("toledo_pitching.csv")
-        aaa_roster = self.transformer.prep_roster(self._load_named_csv("toledo_roster.csv"))
+        aaa_bat = self._load_named_csv(self.aaa_batting_filename)
+        aaa_pitch = self._load_named_csv(self.aaa_pitching_filename)
+        aaa_roster = self.transformer.prep_roster(self._load_named_csv(self.aaa_roster_filename))
 
         players_raw = self._load_named_csv("player_ratings.csv")
         players = self.transformer.prepare_ratings(players_raw)
@@ -530,10 +567,15 @@ class DashboardGenerator:
         )
 
     def write_outputs(self, outputs: DashboardOutputs) -> None:
-        outputs.mlb_hitters_dashboard.to_csv(self.out_dir / "mlb_hitters_dashboard.csv", index=False)
-        outputs.mlb_pitchers_dashboard.to_csv(self.out_dir / "mlb_pitchers_dashboard.csv", index=False)
-        outputs.aaa_hitters_dashboard.to_csv(self.out_dir / "aaa_hitters_dashboard.csv", index=False)
-        outputs.aaa_pitchers_dashboard.to_csv(self.out_dir / "aaa_pitchers_dashboard.csv", index=False)
+        mlb_hitters_csv = f"{self._slugify(f'{self.mlb_team_name} hitters')}_dashboard.csv"
+        mlb_pitchers_csv = f"{self._slugify(f'{self.mlb_team_name} pitchers')}_dashboard.csv"
+        aaa_hitters_csv = f"{self._slugify(f'{self.aaa_team_name} hitters')}_dashboard.csv"
+        aaa_pitchers_csv = f"{self._slugify(f'{self.aaa_team_name} pitchers')}_dashboard.csv"
+
+        outputs.mlb_hitters_dashboard.to_csv(self.out_dir / mlb_hitters_csv, index=False)
+        outputs.mlb_pitchers_dashboard.to_csv(self.out_dir / mlb_pitchers_csv, index=False)
+        outputs.aaa_hitters_dashboard.to_csv(self.out_dir / aaa_hitters_csv, index=False)
+        outputs.aaa_pitchers_dashboard.to_csv(self.out_dir / aaa_pitchers_csv, index=False)
         outputs.recommended_lineup_vs_rhp.to_csv(self.out_dir / "recommended_lineup_vs_rhp.csv", index=False)
         outputs.recommended_lineup_vs_lhp.to_csv(self.out_dir / "recommended_lineup_vs_lhp.csv", index=False)
         outputs.recommended_rotation.to_csv(self.out_dir / "recommended_rotation.csv", index=False)
@@ -543,16 +585,16 @@ class DashboardGenerator:
 
         report = f"""# OOTP GM Dashboard
 
-## MLB hitters - current value
+    ## {self.mlb_team_name} hitters - current value
 {self.md_table(outputs.mlb_hitters_dashboard)}
 
-## MLB pitchers - current value
+    ## {self.mlb_team_name} pitchers - current value
 {self.md_table(outputs.mlb_pitchers_dashboard)}
 
-## AAA hitters - promotion board
+    ## {self.aaa_team_name} hitters - promotion board
 {self.md_table(outputs.aaa_hitters_dashboard)}
 
-## AAA pitchers - promotion board
+    ## {self.aaa_team_name} pitchers - promotion board
 {self.md_table(outputs.aaa_pitchers_dashboard)}
 
 ## Recommended lineup vs RHP
@@ -570,7 +612,7 @@ class DashboardGenerator:
 ## Bullpen roles
 {self.md_table(outputs.recommended_bullpen_roles)}
 
-        ## Recommended transactions
+  ## Recommended transactions
 {self.md_table(outputs.recommended_transactions)}
 """
         (self.out_dir / "ootp_gm_dashboard.md").write_text(report, encoding="utf-8")
