@@ -88,6 +88,29 @@ python scripts/generate.py \
 	--aaa-team 'Toledo Mud Hens'
 ```
 
+## Testing
+
+Run the focused unit tests with the project virtual environment:
+
+```bash
+./scripts/test.sh
+```
+
+Equivalent direct command:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
+```
+
+CI-friendly example step:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install pandas numpy sqlalchemy pymysql tabulate
+./scripts/test.sh
+```
+
 ## MySQL Import Workflow
 
 If you export OOTP SQL files into `sql/`, import them with:

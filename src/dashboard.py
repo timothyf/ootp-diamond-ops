@@ -24,6 +24,7 @@ from src.dashboard_sections import (
     build_pitcher_dashboard,
     build_pitcher_standard_stats,
 )
+from src.dashboard_writers import DashboardOutputWriter
 from src.metrics import MetricsCalculator
 from src.player_detail_pages import PlayerDetailPageWriter
 from src.roster_planning import LineupPlanner
@@ -209,124 +210,24 @@ class DashboardGenerator:
     def _write_player_detail_pages(self, group_frames: dict[str, pd.DataFrame]) -> dict[str, dict[str, str]]:
         return self._player_detail_writer().write_player_detail_pages(group_frames)
 
+    def _output_writer(self) -> DashboardOutputWriter:
+        return DashboardOutputWriter(
+            out_dir=self.out_dir,
+            mlb_team_name=self.mlb_team_name,
+            aaa_team_name=self.aaa_team_name,
+            slugify=self._slugify,
+            md_table=self.md_table,
+            html_table=self.html_table,
+            html_shell=self._html_shell,
+            output_sections=self._output_sections,
+            write_player_detail_pages=self._write_player_detail_pages,
+            link_player_names=self._link_player_names,
+            round_score_columns=self._round_score_columns,
+            format_ip_columns=self._format_ip_columns,
+        )
+
     def _write_html_outputs(self, outputs: DashboardOutputs) -> None:
-        sections = self._output_sections(outputs)
-        frames = getattr(self, "_latest_frames", {})
-        player_links = self._write_player_detail_pages(frames) if isinstance(frames, dict) else {}
-        mlb_home_slug = self._slugify(f"{self.mlb_team_name} team")
-        aaa_home_slug = self._slugify(f"{self.aaa_team_name} team")
-
-        # summary_cards = [
-        #     (f"{self.mlb_team_name} hitters", len(outputs.mlb_hitters_dashboard)),
-        #     (f"{self.mlb_team_name} pitchers", len(outputs.mlb_pitchers_dashboard)),
-        #     (f"{self.aaa_team_name} hitters", len(outputs.aaa_hitters_dashboard)),
-        #     (f"{self.aaa_team_name} pitchers", len(outputs.aaa_pitchers_dashboard)),
-        #     ("Transactions", len(outputs.recommended_transactions)),
-        #     ("Platoon notes", len(outputs.platoon_diagnostics)),
-        # ]
-        # summary_html = "".join(
-        #     f'<article class="summary-card"><span class="eyebrow">{escape(label)}</span><strong>{value}</strong></article>'
-        #     for label, value in summary_cards
-        # )
-
-        overview_sections = []
-        for title, df, group in sections:
-            slug = self._slugify(title)
-            highlight_starters = "active depth chart" in title.lower()
-            preview = df.head(8)
-            linked_preview = self._link_player_names(preview, player_links.get(group, {})) if group else preview
-            overview_sections.append(
-                f"""
-                <section class="section-card">
-                  <h2>{escape(title)}</h2>
-                  <p>{len(df)} rows available in this section.</p>
-                  <div class="table-wrap">
-                                                                                {self.html_table(linked_preview, allow_html=True, sortable=False, highlight_starters=highlight_starters)}
-                  </div>
-                  <a class="section-link" href="{slug}.html">Open full section</a>
-                </section>
-                """
-            )
-
-        dashboard_body = f"""
-        <section class="section-grid">
-          {''.join(overview_sections)}
-        </section>
-        """
-        (self.out_dir / "dashboard.html").write_text(
-            self._html_shell("OOTP DiamondOps", dashboard_body, active_page="dashboard"),
-            encoding="utf-8",
-        )
-
-        def team_hub_body(team_name: str, prefix: str, intro: str) -> str:
-            cards: list[str] = []
-            for title, df, group in sections:
-                if not group or not group.startswith(prefix):
-                    continue
-                slug = self._slugify(title)
-                cards.append(
-                    f'<article class="summary-card">'
-                    f'<span class="eyebrow">Section</span>'
-                    f'<strong style="font-size:1.2rem;line-height:1.3;">{escape(title)}</strong>'
-                    f'<p style="margin:8px 0 10px;color:var(--muted);font-size:0.92rem;">{len(df)} rows</p>'
-                    f'<a class="section-link" href="{slug}.html">Open page</a>'
-                    f'</article>'
-                )
-            if not cards:
-                cards.append('<p class="empty-state">No team pages available.</p>')
-            return (
-                f'<section class="section-card">'
-                f'<h2>{escape(team_name)} Team Hub</h2>'
-                f'<p>{escape(intro)}</p>'
-                f'<section class="summary-grid">{"".join(cards)}</section>'
-                f'</section>'
-            )
-
-        mlb_hub_body = team_hub_body(
-            self.mlb_team_name,
-            "mlb_",
-            "Current value boards, roster stats, and planning outputs for the MLB club.",
-        )
-        (self.out_dir / f"{mlb_home_slug}.html").write_text(
-            self._html_shell(f"{self.mlb_team_name} Team", mlb_hub_body, active_page=mlb_home_slug),
-            encoding="utf-8",
-        )
-
-        aaa_hub_body = team_hub_body(
-            self.aaa_team_name,
-            "aaa_",
-            "Promotion boards and roster stat pages for the AAA club.",
-        )
-        (self.out_dir / f"{aaa_home_slug}.html").write_text(
-            self._html_shell(f"{self.aaa_team_name} Team", aaa_hub_body, active_page=aaa_home_slug),
-            encoding="utf-8",
-        )
-
-        for title, df, group in sections:
-            slug = self._slugify(title)
-            highlight_starters = "active depth chart" in title.lower()
-            linked_df = self._link_player_names(df, player_links.get(group, {})) if group else df
-            if group and group.startswith("mlb_"):
-                active_nav = mlb_home_slug
-            elif group and group.startswith("aaa_"):
-                active_nav = aaa_home_slug
-            elif title == "Recommended transactions":
-                active_nav = "recommended_transactions"
-            else:
-                active_nav = "dashboard"
-            body = f"""
-            <section class="section-card">
-              <h2>{escape(title)}</h2>
-              <p>{len(df)} rows in this report.</p>
-              <div class="table-wrap">
-                                {self.html_table(linked_df, allow_html=True, highlight_starters=highlight_starters)}
-              </div>
-            </section>
-            """
-            (self.out_dir / f"{slug}.html").write_text(
-                self._html_shell(title, body, active_page=active_nav),
-                encoding="utf-8",
-            )
+        self._output_writer()._write_html_outputs(outputs, getattr(self, "_latest_frames", {}))
 
     def _load_named_csv(self, filename: str) -> pd.DataFrame:
         df = self.repository.load(filename)
@@ -429,78 +330,7 @@ class DashboardGenerator:
         )
 
     def write_outputs(self, outputs: DashboardOutputs) -> None:
-        outputs.mlb_hitters_dashboard = self._round_score_columns(outputs.mlb_hitters_dashboard)
-        outputs.mlb_pitchers_dashboard = self._round_score_columns(outputs.mlb_pitchers_dashboard)
-        outputs.aaa_hitters_dashboard = self._round_score_columns(outputs.aaa_hitters_dashboard)
-        outputs.aaa_pitchers_dashboard = self._round_score_columns(outputs.aaa_pitchers_dashboard)
-        outputs.recommended_lineup_vs_rhp = self._round_score_columns(outputs.recommended_lineup_vs_rhp)
-        outputs.recommended_lineup_vs_lhp = self._round_score_columns(outputs.recommended_lineup_vs_lhp)
-        outputs.recommended_rotation = self._round_score_columns(outputs.recommended_rotation)
-        outputs.recommended_bullpen_roles = self._round_score_columns(outputs.recommended_bullpen_roles)
-        outputs.platoon_diagnostics = self._round_score_columns(outputs.platoon_diagnostics)
-        outputs.recommended_transactions = self._round_score_columns(outputs.recommended_transactions)
-
-        outputs.mlb_hitters_dashboard = self._format_ip_columns(outputs.mlb_hitters_dashboard)
-        outputs.mlb_pitchers_dashboard = self._format_ip_columns(outputs.mlb_pitchers_dashboard)
-        outputs.aaa_hitters_dashboard = self._format_ip_columns(outputs.aaa_hitters_dashboard)
-        outputs.aaa_pitchers_dashboard = self._format_ip_columns(outputs.aaa_pitchers_dashboard)
-        outputs.recommended_lineup_vs_rhp = self._format_ip_columns(outputs.recommended_lineup_vs_rhp)
-        outputs.recommended_lineup_vs_lhp = self._format_ip_columns(outputs.recommended_lineup_vs_lhp)
-        outputs.recommended_rotation = self._format_ip_columns(outputs.recommended_rotation)
-        outputs.recommended_bullpen_roles = self._format_ip_columns(outputs.recommended_bullpen_roles)
-        outputs.platoon_diagnostics = self._format_ip_columns(outputs.platoon_diagnostics)
-        outputs.recommended_transactions = self._format_ip_columns(outputs.recommended_transactions)
-
-        mlb_hitters_csv = f"{self._slugify(f'{self.mlb_team_name} hitters')}_dashboard.csv"
-        mlb_pitchers_csv = f"{self._slugify(f'{self.mlb_team_name} pitchers')}_dashboard.csv"
-        aaa_hitters_csv = f"{self._slugify(f'{self.aaa_team_name} hitters')}_dashboard.csv"
-        aaa_pitchers_csv = f"{self._slugify(f'{self.aaa_team_name} pitchers')}_dashboard.csv"
-
-        outputs.mlb_hitters_dashboard.to_csv(self.out_dir / mlb_hitters_csv, index=False)
-        outputs.mlb_pitchers_dashboard.to_csv(self.out_dir / mlb_pitchers_csv, index=False)
-        outputs.aaa_hitters_dashboard.to_csv(self.out_dir / aaa_hitters_csv, index=False)
-        outputs.aaa_pitchers_dashboard.to_csv(self.out_dir / aaa_pitchers_csv, index=False)
-        outputs.recommended_lineup_vs_rhp.to_csv(self.out_dir / "recommended_lineup_vs_rhp.csv", index=False)
-        outputs.recommended_lineup_vs_lhp.to_csv(self.out_dir / "recommended_lineup_vs_lhp.csv", index=False)
-        outputs.recommended_rotation.to_csv(self.out_dir / "recommended_rotation.csv", index=False)
-        outputs.recommended_bullpen_roles.to_csv(self.out_dir / "recommended_bullpen_roles.csv", index=False)
-        outputs.recommended_transactions.to_csv(self.out_dir / "recommended_transactions.csv", index=False)
-        outputs.platoon_diagnostics.to_csv(self.out_dir / "platoon_diagnostics.csv", index=False)
-
-        report = f"""# OOTP DiamondOps
-
-    ## {self.mlb_team_name} hitters - current value
-{self.md_table(outputs.mlb_hitters_dashboard)}
-
-    ## {self.mlb_team_name} pitchers - current value
-{self.md_table(outputs.mlb_pitchers_dashboard)}
-
-    ## {self.aaa_team_name} hitters - promotion board
-{self.md_table(outputs.aaa_hitters_dashboard)}
-
-    ## {self.aaa_team_name} pitchers - promotion board
-{self.md_table(outputs.aaa_pitchers_dashboard)}
-
-## Recommended lineup vs RHP
-{self.md_table(outputs.recommended_lineup_vs_rhp)}
-
-## Recommended lineup vs LHP
-{self.md_table(outputs.recommended_lineup_vs_lhp)}
-
-## Platoon diagnostics
-{self.md_table(outputs.platoon_diagnostics)}
-
-## Recommended rotation
-{self.md_table(outputs.recommended_rotation)}
-
-## Bullpen roles
-{self.md_table(outputs.recommended_bullpen_roles)}
-
-  ## Recommended transactions
-{self.md_table(outputs.recommended_transactions)}
-"""
-        (self.out_dir / "ootp_gm_dashboard.md").write_text(report, encoding="utf-8")
-        self._write_html_outputs(outputs)
+        self._output_writer().write_outputs(outputs, getattr(self, "_latest_frames", {}))
 
     def run(self) -> DashboardOutputs:
         outputs = self.build_outputs()
