@@ -61,6 +61,9 @@ class DashboardGenerator:
             self.mlb_team_name = str(self.repository.mlb_team_name).split()[0]
         if hasattr(self.repository, "aaa_team_name"):
             self.aaa_team_name = str(self.repository.aaa_team_name).split()[0]
+
+        export_date = self.repository.get_export_date() if hasattr(self.repository, "get_export_date") else None
+        self.ootp_export_date = str(export_date).strip() if export_date else None
         self.transformer = transformer or PlayerDataTransformer()
         self.metrics = metrics or MetricsCalculator(self.transformer)
         self.lineup_planner = lineup_planner or LineupPlanner()
@@ -77,6 +80,52 @@ class DashboardGenerator:
         if df.empty:
             return '<p class="empty-state">No rows</p>'
         return df.to_html(index=False, classes=["data-table"], border=0, escape=not allow_html)
+
+    @staticmethod
+    def _round_score_columns(df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return df
+        rounded = df.copy()
+        for col in rounded.columns:
+            if "score" not in str(col).lower():
+                continue
+            numeric = pd.to_numeric(rounded[col], errors="coerce")
+            if numeric.notna().any():
+                rounded[col] = numeric.round(2)
+        return rounded
+
+    @staticmethod
+    def _format_ip_columns(df: pd.DataFrame) -> pd.DataFrame:
+        """Format innings columns using MLB notation (.1/.2 for 1/3 and 2/3)."""
+        if df.empty:
+            return df
+
+        formatted = df.copy()
+        ip_cols = [c for c in formatted.columns if str(c).lower() in {"ip", "innings_pitched"}]
+        if not ip_cols:
+            return formatted
+
+        for col in ip_cols:
+            numeric = pd.to_numeric(formatted[col], errors="coerce")
+            if not numeric.notna().any():
+                continue
+
+            whole = numeric.fillna(0).floordiv(1)
+            frac = numeric - whole
+
+            is_notation_frac = (
+                (frac - 0.0).abs() < 1e-6
+            ) | ((frac - 0.1).abs() < 1e-6) | ((frac - 0.2).abs() < 1e-6)
+            is_decimal_frac = ((frac - (1.0 / 3.0)).abs() < 0.02) | ((frac - (2.0 / 3.0)).abs() < 0.02)
+
+            mlb_frac = pd.Series(0.0, index=formatted.index)
+            mlb_frac = mlb_frac.mask(((frac - 0.1).abs() < 0.02) | ((frac - (1.0 / 3.0)).abs() < 0.02), 0.1)
+            mlb_frac = mlb_frac.mask(((frac - 0.2).abs() < 0.02) | ((frac - (2.0 / 3.0)).abs() < 0.02), 0.2)
+
+            converted = (whole + mlb_frac).where(is_notation_frac | is_decimal_frac, numeric.round(1))
+            formatted[col] = converted.round(1)
+
+        return formatted
 
     @staticmethod
     def _slugify(title: str) -> str:
@@ -111,56 +160,24 @@ class DashboardGenerator:
         return "mlb", "aaa"
 
     def _html_shell(self, title: str, body: str, active_page: str | None = None) -> str:
+        mlb_home_slug = self._slugify(f"{self.mlb_team_name} team")
+        aaa_home_slug = self._slugify(f"{self.aaa_team_name} team")
         mlb_hitters_slug = self._slugify(f"{self.mlb_team_name} hitters - current value")
         mlb_pitchers_slug = self._slugify(f"{self.mlb_team_name} pitchers - current value")
         aaa_hitters_slug = self._slugify(f"{self.aaa_team_name} hitters - promotion board")
         aaa_pitchers_slug = self._slugify(f"{self.aaa_team_name} pitchers - promotion board")
-        mlb_hitting_stats_slug = self._slugify(f"{self.mlb_team_name} hitting stats")
-        mlb_pitching_stats_slug = self._slugify(f"{self.mlb_team_name} pitching stats")
-        aaa_hitting_stats_slug = self._slugify(f"{self.aaa_team_name} hitting stats")
-        aaa_pitching_stats_slug = self._slugify(f"{self.aaa_team_name} pitching stats")
 
         nav_items = [
             ("dashboard", "dashboard.html", "Dashboard"),
             (
-                mlb_hitters_slug,
-                f"{mlb_hitters_slug}.html",
-                f"{self.mlb_team_name} Hitters",
+                mlb_home_slug,
+                f"{mlb_home_slug}.html",
+                f"{self.mlb_team_name}",
             ),
             (
-                mlb_pitchers_slug,
-                f"{mlb_pitchers_slug}.html",
-                f"{self.mlb_team_name} Pitchers",
-            ),
-            (
-                aaa_hitters_slug,
-                f"{aaa_hitters_slug}.html",
-                f"{self.aaa_team_name} Hitters",
-            ),
-            (
-                aaa_pitchers_slug,
-                f"{aaa_pitchers_slug}.html",
-                f"{self.aaa_team_name} Pitchers",
-            ),
-            (
-                mlb_hitting_stats_slug,
-                f"{mlb_hitting_stats_slug}.html",
-                f"{self.mlb_team_name} Hitting Stats",
-            ),
-            (
-                mlb_pitching_stats_slug,
-                f"{mlb_pitching_stats_slug}.html",
-                f"{self.mlb_team_name} Pitching Stats",
-            ),
-            (
-                aaa_hitting_stats_slug,
-                f"{aaa_hitting_stats_slug}.html",
-                f"{self.aaa_team_name} Hitting Stats",
-            ),
-            (
-                aaa_pitching_stats_slug,
-                f"{aaa_pitching_stats_slug}.html",
-                f"{self.aaa_team_name} Pitching Stats",
+                aaa_home_slug,
+                f"{aaa_home_slug}.html",
+                f"{self.aaa_team_name}",
             ),
             ("recommended_transactions", "recommended_transactions.html", "Transactions"),
         ]
@@ -224,6 +241,17 @@ class DashboardGenerator:
       color: rgba(249, 247, 241, 0.84);
       line-height: 1.55;
     }}
+        .hero-date {{
+            margin-top: 10px;
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(249, 247, 241, 0.24);
+            background: rgba(249, 247, 241, 0.10);
+            color: rgba(249, 247, 241, 0.96);
+            font-size: 0.9rem;
+            letter-spacing: 0.03em;
+        }}
     .top-nav {{
       display: flex;
       flex-wrap: wrap;
@@ -406,6 +434,7 @@ class DashboardGenerator:
     <section class="hero">
       <h1>{escape(title)}</h1>
       <h3>Baseball Operations Dashboard for OOTP</h3>
+            <p class="hero-date">OOTP Date: {escape(self.ootp_export_date or 'Unknown')}</p>
     </section>
     {nav}
     {body}
@@ -687,53 +716,69 @@ class DashboardGenerator:
         return html
 
     @staticmethod
-    def _component_rows(frame_row: pd.Series, fields: list[tuple[str, str]]) -> pd.DataFrame:
+    def _component_rows(
+        frame_row: pd.Series,
+        fields: list[tuple[str, str] | tuple[str, str, str]],
+        include_weight: bool = False,
+    ) -> pd.DataFrame:
         rows = []
-        for label, col in fields:
+        for field in fields:
+            if len(field) == 3:
+                label, col, weight = field
+            else:
+                label, col = field
+                weight = ""
             if col not in frame_row.index:
                 continue
             value = frame_row[col]
             if pd.isna(value):
                 continue
-            if isinstance(value, (int, float)):
-                value = round(float(value), 4)
-            rows.append({"component": label, "value": value})
+            numeric_value = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+            if pd.notna(numeric_value):
+                if "score" in col.lower():
+                    value = f"{float(numeric_value):.2f}"
+                else:
+                    value = round(float(numeric_value), 4)
+            row = {"component": label, "value": value}
+            if include_weight:
+                row["weight"] = weight
+            rows.append(row)
         return pd.DataFrame(rows)
 
     def _write_player_detail_pages(self, group_frames: dict[str, pd.DataFrame]) -> dict[str, dict[str, str]]:
         hitter_fields = [
-            ("Overall Score", "overall_hitter_score"),
-            ("Projection Score", "projection_hitter_score"),
-            ("Offense Score", "offense_score"),
-            ("Regressed Offense", "offense_score_regressed"),
-            ("Current Ratings", "ratings_hitter_now"),
-            ("Future Ratings", "ratings_hitter_future"),
-            ("Discipline Component", "discipline_component"),
-            ("Platoon Skill Component", "platoon_skill_component"),
-            ("Defensive Component", "defensive_component"),
-            ("Running Component", "running_component"),
-            ("Scarcity Bonus", "scarcity_bonus"),
-            ("Age Bonus", "age_bonus"),
-            ("Select Score vs RHP", "select_score_rhp"),
-            ("Select Score vs LHP", "select_score_lhp"),
+            ("Overall Score", "overall_hitter_score", "computed"),
+            ("Projection Score", "projection_hitter_score", "computed"),
+            ("Offense Score", "offense_score", "feeds regressed offense"),
+            ("Regressed Offense", "offense_score_regressed", "0.60 overall / 0.28 projection"),
+            ("Current Ratings", "ratings_hitter_now", "0.22 overall / 0.27 projection"),
+            ("Future Ratings", "ratings_hitter_future", "0.34 projection"),
+            ("Discipline Component", "discipline_component", "0.80 overall / 0.90 projection"),
+            ("Platoon Skill Component", "platoon_skill_component", "0.60 overall / 0.70 projection"),
+            ("Defensive Component", "defensive_component", "0.50 overall / 0.35 projection"),
+            ("Running Component", "running_component", "0.25 overall / 0.20 projection"),
+            ("Scarcity Bonus", "scarcity_bonus", "0.40 overall"),
+            ("Age Bonus", "age_bonus", "0.50 projection"),
+            ("Select Score vs RHP", "select_score_rhp", "selection logic only"),
+            ("Select Score vs LHP", "select_score_lhp", "selection logic only"),
         ]
         pitcher_fields = [
-            ("Current Score", "score"),
-            ("Projection Score", "projection_pitcher_score"),
-            ("Results Score", "results_pitcher_score"),
-            ("Regressed Results", "results_pitcher_score_regressed"),
-            ("Current Ratings", "ratings_pitcher_now"),
-            ("Future Ratings", "ratings_pitcher_future"),
-            ("Command Component", "command_dominance_component"),
-            ("Contact Management", "contact_management_component"),
-            ("Durability", "durability_component"),
-            ("Reliability", "pitching_reliability"),
-            ("Age Bonus", "age_bonus"),
-            ("K/9", "k_9_val"),
-            ("BB/9", "bb_9_val"),
-            ("HR/9", "hr_9_val"),
-            ("K-BB/9", "k_bb_9_val"),
-            ("GB Share", "gb_share_val"),
+            ("Current Score", "score", "computed"),
+            ("Projection Score", "projection_pitcher_score", "computed"),
+            ("Results Score", "results_pitcher_score", "feeds regressed results"),
+            ("Regressed Results", "results_pitcher_score_regressed", "0.58 score / 0.26 projection"),
+            ("Current Ratings", "ratings_pitcher_now", "0.30 score / 0.24 projection"),
+            ("Future Ratings", "ratings_pitcher_future", "0.34 projection"),
+            ("Command Component", "command_dominance_component", "0.20 score / 0.22 projection"),
+            ("Contact Management", "contact_management_component", "0.14 score / 0.14 projection"),
+            ("Durability", "durability_component", "0.12 score / 0.10 projection"),
+            ("Reliability", "pitching_reliability", "regression factor (k=45)"),
+            ("Age Bonus", "age_bonus", "0.50 projection"),
+            ("K/9", "k_9_val", "input metric"),
+            ("BB/9", "bb_9_val", "input metric"),
+            ("HR/9", "hr_9_val", "input metric"),
+            ("K-BB/9", "k_bb_9_val", "input metric"),
+            ("GB Share", "gb_share_val", "input metric"),
         ]
 
         link_maps: dict[str, dict[str, str]] = {}
@@ -751,7 +796,7 @@ class DashboardGenerator:
                 player_name = str(row["player_name"])
                 lookup = str(row["player_lookup"])
                 filename = self._player_detail_filename(group, player_name)
-                components = self._component_rows(row, fields)
+                components = self._component_rows(row, fields, include_weight=True)
 
                 summary_fields = [
                     ("Position", "primary_position"),
@@ -793,6 +838,8 @@ class DashboardGenerator:
         sections = self._output_sections(outputs)
         frames = getattr(self, "_latest_frames", {})
         player_links = self._write_player_detail_pages(frames) if isinstance(frames, dict) else {}
+        mlb_home_slug = self._slugify(f"{self.mlb_team_name} team")
+        aaa_home_slug = self._slugify(f"{self.aaa_team_name} team")
 
         summary_cards = [
             (f"{self.mlb_team_name} hitters", len(outputs.mlb_hitters_dashboard)),
@@ -838,9 +885,61 @@ class DashboardGenerator:
             encoding="utf-8",
         )
 
+        def team_hub_body(team_name: str, prefix: str, intro: str) -> str:
+            cards: list[str] = []
+            for title, df, group in sections:
+                if not group or not group.startswith(prefix):
+                    continue
+                slug = self._slugify(title)
+                cards.append(
+                    f'<article class="summary-card">'
+                    f'<span class="eyebrow">Section</span>'
+                    f'<strong style="font-size:1.2rem;line-height:1.3;">{escape(title)}</strong>'
+                    f'<p style="margin:8px 0 10px;color:var(--muted);font-size:0.92rem;">{len(df)} rows</p>'
+                    f'<a class="section-link" href="{slug}.html">Open page</a>'
+                    f'</article>'
+                )
+            if not cards:
+                cards.append('<p class="empty-state">No team pages available.</p>')
+            return (
+                f'<section class="section-card">'
+                f'<h2>{escape(team_name)} Team Hub</h2>'
+                f'<p>{escape(intro)}</p>'
+                f'<section class="summary-grid">{"".join(cards)}</section>'
+                f'</section>'
+            )
+
+        mlb_hub_body = team_hub_body(
+            self.mlb_team_name,
+            "mlb_",
+            "Current value boards, roster stats, and planning outputs for the MLB club.",
+        )
+        (self.out_dir / f"{mlb_home_slug}.html").write_text(
+            self._html_shell(f"{self.mlb_team_name} Team", mlb_hub_body, active_page=mlb_home_slug),
+            encoding="utf-8",
+        )
+
+        aaa_hub_body = team_hub_body(
+            self.aaa_team_name,
+            "aaa_",
+            "Promotion boards and roster stat pages for the AAA club.",
+        )
+        (self.out_dir / f"{aaa_home_slug}.html").write_text(
+            self._html_shell(f"{self.aaa_team_name} Team", aaa_hub_body, active_page=aaa_home_slug),
+            encoding="utf-8",
+        )
+
         for title, df, group in sections:
             slug = self._slugify(title)
             linked_df = self._link_player_names(df, player_links.get(group, {})) if group else df
+            if group and group.startswith("mlb_"):
+                active_nav = mlb_home_slug
+            elif group and group.startswith("aaa_"):
+                active_nav = aaa_home_slug
+            elif title == "Recommended transactions":
+                active_nav = "recommended_transactions"
+            else:
+                active_nav = "dashboard"
             body = f"""
             <section class="section-card">
               <h2>{escape(title)}</h2>
@@ -851,7 +950,7 @@ class DashboardGenerator:
             </section>
             """
             (self.out_dir / f"{slug}.html").write_text(
-                self._html_shell(title, body, active_page=slug),
+                self._html_shell(title, body, active_page=active_nav),
                 encoding="utf-8",
             )
 
@@ -1108,6 +1207,28 @@ class DashboardGenerator:
         )
 
     def write_outputs(self, outputs: DashboardOutputs) -> None:
+        outputs.mlb_hitters_dashboard = self._round_score_columns(outputs.mlb_hitters_dashboard)
+        outputs.mlb_pitchers_dashboard = self._round_score_columns(outputs.mlb_pitchers_dashboard)
+        outputs.aaa_hitters_dashboard = self._round_score_columns(outputs.aaa_hitters_dashboard)
+        outputs.aaa_pitchers_dashboard = self._round_score_columns(outputs.aaa_pitchers_dashboard)
+        outputs.recommended_lineup_vs_rhp = self._round_score_columns(outputs.recommended_lineup_vs_rhp)
+        outputs.recommended_lineup_vs_lhp = self._round_score_columns(outputs.recommended_lineup_vs_lhp)
+        outputs.recommended_rotation = self._round_score_columns(outputs.recommended_rotation)
+        outputs.recommended_bullpen_roles = self._round_score_columns(outputs.recommended_bullpen_roles)
+        outputs.platoon_diagnostics = self._round_score_columns(outputs.platoon_diagnostics)
+        outputs.recommended_transactions = self._round_score_columns(outputs.recommended_transactions)
+
+        outputs.mlb_hitters_dashboard = self._format_ip_columns(outputs.mlb_hitters_dashboard)
+        outputs.mlb_pitchers_dashboard = self._format_ip_columns(outputs.mlb_pitchers_dashboard)
+        outputs.aaa_hitters_dashboard = self._format_ip_columns(outputs.aaa_hitters_dashboard)
+        outputs.aaa_pitchers_dashboard = self._format_ip_columns(outputs.aaa_pitchers_dashboard)
+        outputs.recommended_lineup_vs_rhp = self._format_ip_columns(outputs.recommended_lineup_vs_rhp)
+        outputs.recommended_lineup_vs_lhp = self._format_ip_columns(outputs.recommended_lineup_vs_lhp)
+        outputs.recommended_rotation = self._format_ip_columns(outputs.recommended_rotation)
+        outputs.recommended_bullpen_roles = self._format_ip_columns(outputs.recommended_bullpen_roles)
+        outputs.platoon_diagnostics = self._format_ip_columns(outputs.platoon_diagnostics)
+        outputs.recommended_transactions = self._format_ip_columns(outputs.recommended_transactions)
+
         mlb_hitters_csv = f"{self._slugify(f'{self.mlb_team_name} hitters')}_dashboard.csv"
         mlb_pitchers_csv = f"{self._slugify(f'{self.mlb_team_name} pitchers')}_dashboard.csv"
         aaa_hitters_csv = f"{self._slugify(f'{self.aaa_team_name} hitters')}_dashboard.csv"

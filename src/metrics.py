@@ -255,7 +255,8 @@ class MetricsCalculator:
 
     def add_pitching_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        df["ip_val"] = self.transformer.num_alias(df, ["ip", "innings_pitched"])
+        ip_raw = self.transformer.num_alias(df, ["ip", "innings_pitched"])
+        df["ip_val"] = self.transformer.innings_notation_to_decimal(ip_raw)
         df["era_val"] = self.transformer.num_alias(df, ["era"])
         df["fip_val"] = self.transformer.num_alias(df, ["fip"])
         df["whip_val"] = self.transformer.num_alias(df, ["whip"])

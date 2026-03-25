@@ -13,6 +13,10 @@ class CsvRepository:
     def load(self, name: str) -> pd.DataFrame:
         return pd.read_csv(self.data_dir / name, low_memory=False)
 
+    def get_export_date(self) -> str | None:
+        # CSV exports in this project do not carry an in-file OOTP world date.
+        return None
+
 
 class MySqlRepository:
     """Load dashboard input frames from a MySQL database.
@@ -207,6 +211,32 @@ class MySqlRepository:
                     return builder(team_name)
 
             raise ValueError(f"Unsupported dataset '{name}' for MySqlRepository")
+
+    def get_export_date(self) -> str | None:
+        """Return the in-game OOTP date used by the simulation, if available."""
+        from sqlalchemy import text
+
+        sql = """
+            SELECT MAX(`current_date`) AS ootp_current_date
+        FROM leagues
+        """
+        try:
+            with self._engine.connect() as conn:
+                row = conn.execute(text(sql)).fetchone()
+        except Exception:
+            return None
+
+        if row is None:
+            return None
+
+        value = row._mapping.get("ootp_current_date") if hasattr(row, "_mapping") else row[0]
+        if value is None:
+            value = row[0]
+        if value is None:
+            return None
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y-%m-%d")
+        return str(value)
 
     def _build_roster(self, team_name: str) -> pd.DataFrame:
             sql = """
@@ -403,7 +433,30 @@ class MySqlRepository:
                 SUM(COALESCE(pgp.l, 0)) AS L,
                 SUM(COALESCE(pgp.s, 0)) AS SV,
                 SUM(COALESCE(pgp.hld, 0)) AS HLD,
-                ROUND(SUM(COALESCE(pgp.ip, 0)), 1) AS IP,
+                ROUND(
+                    FLOOR(
+                        SUM(
+                            COALESCE(
+                                pgp.outs,
+                                FLOOR(COALESCE(pgp.ip, 0)) * 3
+                                + ROUND((COALESCE(pgp.ip, 0) - FLOOR(COALESCE(pgp.ip, 0))) * 10)
+                            )
+                        ) / 3
+                    )
+                    + (
+                        MOD(
+                            SUM(
+                                COALESCE(
+                                    pgp.outs,
+                                    FLOOR(COALESCE(pgp.ip, 0)) * 3
+                                    + ROUND((COALESCE(pgp.ip, 0) - FLOOR(COALESCE(pgp.ip, 0))) * 10)
+                                )
+                            ),
+                            3
+                        ) / 10
+                    ),
+                    1
+                ) AS IP,
                 SUM(COALESCE(pgp.ha, 0)) AS HA,
                 SUM(COALESCE(pgp.hra, 0)) AS HR,
                 SUM(COALESCE(pgp.r, 0)) AS R,
@@ -413,18 +466,93 @@ class MySqlRepository:
                 SUM(COALESCE(pgp.hp, 0)) AS HP,
                 SUM(COALESCE(pgp.gb, 0)) AS GB,
                 SUM(COALESCE(pgp.fb, 0)) AS FB,
-                ROUND(9 * SUM(COALESCE(pgp.er, 0)) / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0), 2) AS ERA,
+                ROUND(
+                    27 * SUM(COALESCE(pgp.er, 0))
+                    / NULLIF(
+                        SUM(
+                            COALESCE(
+                                pgp.outs,
+                                FLOOR(COALESCE(pgp.ip, 0)) * 3
+                                + ROUND((COALESCE(pgp.ip, 0) - FLOOR(COALESCE(pgp.ip, 0))) * 10)
+                            )
+                        ),
+                        0
+                    ),
+                    2
+                ) AS ERA,
                 ROUND(SUM(COALESCE(pgp.ha, 0)) / NULLIF(SUM(COALESCE(pgp.ab, 0)), 0), 3) AS AVG,
                 ROUND((SUM(COALESCE(pgp.ha, 0)) - SUM(COALESCE(pgp.hra, 0))) / NULLIF(SUM(COALESCE(pgp.ab, 0)) - SUM(COALESCE(pgp.k, 0)) - SUM(COALESCE(pgp.hra, 0)), 0), 3) AS BABIP,
-                ROUND((SUM(COALESCE(pgp.ha, 0)) + SUM(COALESCE(pgp.bb, 0))) / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0), 2) AS WHIP,
-                ROUND(9 * SUM(COALESCE(pgp.hra, 0)) / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0), 1) AS `HR/9`,
-                ROUND(9 * SUM(COALESCE(pgp.bb, 0)) / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0), 1) AS `BB/9`,
-                ROUND(9 * SUM(COALESCE(pgp.k, 0)) / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0), 1) AS `K/9`,
+                ROUND(
+                    3 * (SUM(COALESCE(pgp.ha, 0)) + SUM(COALESCE(pgp.bb, 0)))
+                    / NULLIF(
+                        SUM(
+                            COALESCE(
+                                pgp.outs,
+                                FLOOR(COALESCE(pgp.ip, 0)) * 3
+                                + ROUND((COALESCE(pgp.ip, 0) - FLOOR(COALESCE(pgp.ip, 0))) * 10)
+                            )
+                        ),
+                        0
+                    ),
+                    2
+                ) AS WHIP,
+                ROUND(
+                    27 * SUM(COALESCE(pgp.hra, 0))
+                    / NULLIF(
+                        SUM(
+                            COALESCE(
+                                pgp.outs,
+                                FLOOR(COALESCE(pgp.ip, 0)) * 3
+                                + ROUND((COALESCE(pgp.ip, 0) - FLOOR(COALESCE(pgp.ip, 0))) * 10)
+                            )
+                        ),
+                        0
+                    ),
+                    1
+                ) AS `HR/9`,
+                ROUND(
+                    27 * SUM(COALESCE(pgp.bb, 0))
+                    / NULLIF(
+                        SUM(
+                            COALESCE(
+                                pgp.outs,
+                                FLOOR(COALESCE(pgp.ip, 0)) * 3
+                                + ROUND((COALESCE(pgp.ip, 0) - FLOOR(COALESCE(pgp.ip, 0))) * 10)
+                            )
+                        ),
+                        0
+                    ),
+                    1
+                ) AS `BB/9`,
+                ROUND(
+                    27 * SUM(COALESCE(pgp.k, 0))
+                    / NULLIF(
+                        SUM(
+                            COALESCE(
+                                pgp.outs,
+                                FLOOR(COALESCE(pgp.ip, 0)) * 3
+                                + ROUND((COALESCE(pgp.ip, 0) - FLOOR(COALESCE(pgp.ip, 0))) * 10)
+                            )
+                        ),
+                        0
+                    ),
+                    1
+                ) AS `K/9`,
                 ROUND(SUM(COALESCE(pgp.k, 0)) / NULLIF(SUM(COALESCE(pgp.bb, 0)), 0), 1) AS `K/BB`,
                 100 AS `ERA+`,
                 ROUND(
                     ((13 * SUM(COALESCE(pgp.hra, 0))) + (3 * SUM(COALESCE(pgp.bb, 0))) - (2 * SUM(COALESCE(pgp.k, 0))))
-                    / NULLIF(SUM(COALESCE(pgp.ip, 0)), 0)
+                    * 3
+                    / NULLIF(
+                        SUM(
+                            COALESCE(
+                                pgp.outs,
+                                FLOOR(COALESCE(pgp.ip, 0)) * 3
+                                + ROUND((COALESCE(pgp.ip, 0) - FLOOR(COALESCE(pgp.ip, 0))) * 10)
+                            )
+                        ),
+                        0
+                    )
                     + 3.20,
                     2
                 ) AS FIP,
@@ -618,6 +746,20 @@ class PlayerDataTransformer:
         if col is None:
             return pd.Series(0, index=df.index, dtype="float64")
         return pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    @staticmethod
+    def innings_notation_to_decimal(ip_series: pd.Series) -> pd.Series:
+        """Convert MLB innings notation (e.g., 5.1/5.2) to true decimal innings.
+
+        Values that do not match MLB notation are treated as already-decimal.
+        """
+        ip = pd.to_numeric(ip_series, errors="coerce").fillna(0.0)
+        whole = ip.astype(float).floordiv(1)
+        frac = ip - whole
+        outs = (frac * 10).round()
+        is_notation = outs.isin([0, 1, 2]) & ((frac - (outs / 10.0)).abs() < 1e-6)
+        notation_decimal = whole + (outs / 3.0)
+        return notation_decimal.where(is_notation, ip)
 
     @staticmethod
     def dedupe(df: pd.DataFrame, keep_col: str | None = None) -> pd.DataFrame:
