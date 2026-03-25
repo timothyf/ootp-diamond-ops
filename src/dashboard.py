@@ -76,10 +76,29 @@ class DashboardGenerator:
         return df.to_markdown(index=False)
 
     @staticmethod
-    def html_table(df: pd.DataFrame, allow_html: bool = False) -> str:
+    def html_table(
+        df: pd.DataFrame,
+        allow_html: bool = False,
+        sortable: bool = True,
+        highlight_starters: bool = False,
+    ) -> str:
         if df.empty:
             return '<p class="empty-state">No rows</p>'
-        return df.to_html(index=False, classes=["data-table"], border=0, escape=not allow_html)
+        display_df = df.rename(columns={"primary_position": "position"})
+        table_html = display_df.to_html(
+            index=False,
+            classes=["data-table"],
+            border=0,
+            escape=not allow_html,
+            table_id="",
+            render_links=False,
+        )
+        return table_html.replace(
+            "<table ",
+            f'<table data-sortable="{"true" if sortable else "false"}" '
+            f'data-highlight-starters="{"true" if highlight_starters else "false"}" ',
+            1,
+        )
 
     @staticmethod
     def _round_score_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -346,7 +365,17 @@ class DashboardGenerator:
       text-transform: uppercase;
       letter-spacing: 0.05em;
       font-size: 0.77rem;
+            cursor: pointer;
+            user-select: none;
     }}
+        .data-table thead th.sort-asc::after {{
+            content: " ▲";
+            font-size: 0.7rem;
+        }}
+        .data-table thead th.sort-desc::after {{
+            content: " ▼";
+            font-size: 0.7rem;
+        }}
     .data-table th, .data-table td {{
       padding: 12px 14px;
       border-bottom: 1px solid rgba(31, 42, 42, 0.08);
@@ -356,6 +385,13 @@ class DashboardGenerator:
     .data-table tbody tr:nth-child(even) {{
       background: rgba(13, 92, 99, 0.03);
     }}
+        .data-table tbody tr.starter-row td {{
+            background: rgba(240, 180, 41, 0.18);
+            font-weight: 600;
+        }}
+        .data-table tbody tr.starter-row td:first-child {{
+            box-shadow: inset 4px 0 0 var(--highlight);
+        }}
     .data-table a,
     .data-table a:visited {{
       color: var(--link);
@@ -440,6 +476,74 @@ class DashboardGenerator:
     {body}
   </main>
 </body>
+<script>
+(() => {{
+    const tables = document.querySelectorAll('table.data-table');
+
+    const parseValue = (raw) => {{
+        const text = (raw || '').trim();
+        if (!text) return {{ type: 'text', value: '' }};
+
+        const compact = text.replace(/,/g, '').replace(/%/g, '');
+        const num = Number(compact);
+        if (Number.isFinite(num) && /^[-+]?\\d*\\.?\\d+$/.test(compact)) {{
+            return {{ type: 'number', value: num }};
+        }}
+        return {{ type: 'text', value: text.toLowerCase() }};
+    }};
+
+    tables.forEach((table) => {{
+        if ((table.dataset.highlightStarters || 'false').toLowerCase() === 'true') {{
+            const tbody = table.tBodies && table.tBodies[0];
+            if (tbody) {{
+                Array.from(tbody.rows).forEach((row) => {{
+                    const rankCell = row.cells[1] ? row.cells[1].innerText.trim() : '';
+                    if (rankCell === '1') {{
+                        row.classList.add('starter-row');
+                    }}
+                }});
+            }}
+        }}
+
+        if ((table.dataset.sortable || 'true').toLowerCase() !== 'true') return;
+        const thead = table.tHead;
+        const tbody = table.tBodies && table.tBodies[0];
+        if (!thead || !tbody || !thead.rows.length) return;
+
+        const headers = Array.from(thead.rows[0].cells);
+        const state = {{ index: -1, dir: 'asc' }};
+
+        headers.forEach((th, index) => {{
+            th.addEventListener('click', () => {{
+                const rows = Array.from(tbody.rows);
+                const dir = state.index === index && state.dir === 'asc' ? 'desc' : 'asc';
+                state.index = index;
+                state.dir = dir;
+
+                headers.forEach((h) => h.classList.remove('sort-asc', 'sort-desc'));
+                th.classList.add(dir === 'asc' ? 'sort-asc' : 'sort-desc');
+
+                rows.sort((a, b) => {{
+                    const aCell = a.cells[index] ? a.cells[index].innerText : '';
+                    const bCell = b.cells[index] ? b.cells[index].innerText : '';
+                    const av = parseValue(aCell);
+                    const bv = parseValue(bCell);
+
+                    let result = 0;
+                    if (av.type === 'number' && bv.type === 'number') {{
+                        result = av.value - bv.value;
+                    }} else {{
+                        result = av.value.localeCompare(bv.value, undefined, {{ numeric: true, sensitivity: 'base' }});
+                    }}
+                    return dir === 'asc' ? result : -result;
+                }});
+
+                rows.forEach((row) => tbody.appendChild(row));
+            }});
+        }});
+    }});
+}})();
+</script>
 </html>
 """
 
@@ -449,6 +553,7 @@ class DashboardGenerator:
         mlb_pitchers_stats = self._build_pitcher_standard_stats(frames.get("mlb_pitchers", pd.DataFrame()))
         aaa_hitters_stats = self._build_hitter_standard_stats(frames.get("aaa_hitters", pd.DataFrame()))
         aaa_pitchers_stats = self._build_pitcher_standard_stats(frames.get("aaa_pitchers", pd.DataFrame()))
+        mlb_depth_chart = self._build_active_depth_chart(frames.get("mlb_hitters", pd.DataFrame()))
 
         return [
             (f"{self.mlb_team_name} hitters - current value", outputs.mlb_hitters_dashboard, "mlb_hitters"),
@@ -457,6 +562,7 @@ class DashboardGenerator:
             (f"{self.aaa_team_name} pitchers - promotion board", outputs.aaa_pitchers_dashboard, "aaa_pitchers"),
             (f"{self.mlb_team_name} hitting stats", mlb_hitters_stats, "mlb_hitters"),
             (f"{self.mlb_team_name} pitching stats", mlb_pitchers_stats, "mlb_pitchers"),
+            (f"{self.mlb_team_name} active depth chart", mlb_depth_chart, "mlb_hitters"),
             (f"{self.aaa_team_name} hitting stats", aaa_hitters_stats, "aaa_hitters"),
             (f"{self.aaa_team_name} pitching stats", aaa_pitchers_stats, "aaa_pitchers"),
             ("Recommended lineup vs RHP", outputs.recommended_lineup_vs_rhp, "mlb_hitters"),
@@ -841,22 +947,23 @@ class DashboardGenerator:
         mlb_home_slug = self._slugify(f"{self.mlb_team_name} team")
         aaa_home_slug = self._slugify(f"{self.aaa_team_name} team")
 
-        summary_cards = [
-            (f"{self.mlb_team_name} hitters", len(outputs.mlb_hitters_dashboard)),
-            (f"{self.mlb_team_name} pitchers", len(outputs.mlb_pitchers_dashboard)),
-            (f"{self.aaa_team_name} hitters", len(outputs.aaa_hitters_dashboard)),
-            (f"{self.aaa_team_name} pitchers", len(outputs.aaa_pitchers_dashboard)),
-            ("Transactions", len(outputs.recommended_transactions)),
-            ("Platoon notes", len(outputs.platoon_diagnostics)),
-        ]
-        summary_html = "".join(
-            f'<article class="summary-card"><span class="eyebrow">{escape(label)}</span><strong>{value}</strong></article>'
-            for label, value in summary_cards
-        )
+        # summary_cards = [
+        #     (f"{self.mlb_team_name} hitters", len(outputs.mlb_hitters_dashboard)),
+        #     (f"{self.mlb_team_name} pitchers", len(outputs.mlb_pitchers_dashboard)),
+        #     (f"{self.aaa_team_name} hitters", len(outputs.aaa_hitters_dashboard)),
+        #     (f"{self.aaa_team_name} pitchers", len(outputs.aaa_pitchers_dashboard)),
+        #     ("Transactions", len(outputs.recommended_transactions)),
+        #     ("Platoon notes", len(outputs.platoon_diagnostics)),
+        # ]
+        # summary_html = "".join(
+        #     f'<article class="summary-card"><span class="eyebrow">{escape(label)}</span><strong>{value}</strong></article>'
+        #     for label, value in summary_cards
+        # )
 
         overview_sections = []
         for title, df, group in sections:
             slug = self._slugify(title)
+            highlight_starters = "active depth chart" in title.lower()
             preview = df.head(8)
             linked_preview = self._link_player_names(preview, player_links.get(group, {})) if group else preview
             overview_sections.append(
@@ -865,7 +972,7 @@ class DashboardGenerator:
                   <h2>{escape(title)}</h2>
                   <p>{len(df)} rows available in this section.</p>
                   <div class="table-wrap">
-                    {self.html_table(linked_preview, allow_html=True)}
+                                                                                {self.html_table(linked_preview, allow_html=True, sortable=False, highlight_starters=highlight_starters)}
                   </div>
                   <a class="section-link" href="{slug}.html">Open full section</a>
                 </section>
@@ -873,9 +980,6 @@ class DashboardGenerator:
             )
 
         dashboard_body = f"""
-        <section class="summary-grid">
-          {summary_html}
-        </section>
         <section class="section-grid">
           {''.join(overview_sections)}
         </section>
@@ -931,6 +1035,7 @@ class DashboardGenerator:
 
         for title, df, group in sections:
             slug = self._slugify(title)
+            highlight_starters = "active depth chart" in title.lower()
             linked_df = self._link_player_names(df, player_links.get(group, {})) if group else df
             if group and group.startswith("mlb_"):
                 active_nav = mlb_home_slug
@@ -945,7 +1050,7 @@ class DashboardGenerator:
               <h2>{escape(title)}</h2>
               <p>{len(df)} rows in this report.</p>
               <div class="table-wrap">
-                {self.html_table(linked_df, allow_html=True)}
+                                {self.html_table(linked_df, allow_html=True, highlight_starters=highlight_starters)}
               </div>
             </section>
             """
@@ -1061,6 +1166,149 @@ class DashboardGenerator:
         for col in int_cols:
             stats[col] = stats[col].fillna(0).round().astype(int)
         return stats
+
+    @staticmethod
+    def _build_active_depth_chart(df: pd.DataFrame, depth_per_position: int = 4) -> pd.DataFrame:
+        if df.empty:
+            return pd.DataFrame(
+                columns=["position", "rank", "player_name", "listed_position", "bats", "throws", "pa", "ops", "score"]
+            )
+
+        active = df.loc[df["is_hitter"]].copy()
+        if "status" in active.columns:
+            active = active.loc[active["status"].fillna("").astype(str).str.strip().eq("Active")]
+        if "injured_flag" in active.columns:
+            active = active.loc[~active["injured_flag"].fillna(False)]
+        active = active.drop_duplicates(subset=["player_name"])
+
+        if active.empty:
+            return pd.DataFrame(
+                columns=["position", "rank", "player_name", "listed_position", "bats", "throws", "pa", "ops", "score"]
+            )
+
+        plans: list[tuple[str, list[str]]] = [
+            ("C", ["is_c"]),
+            ("1B", ["is_1b", "is_3b"]),
+            ("2B", ["is_2b", "is_ss"]),
+            ("3B", ["is_3b", "is_1b", "is_2b"]),
+            ("SS", ["is_ss", "is_2b", "is_3b"]),
+            ("LF", ["is_lf", "is_rf", "is_cf"]),
+            ("CF", ["is_cf", "is_lf", "is_rf"]),
+            ("RF", ["is_rf", "is_lf", "is_cf"]),
+            ("DH", ["is_hitter"]),
+        ]
+
+        def primary_position_for_row(row: pd.Series) -> str:
+            raw = str(row.get("primary_position", "")).upper()
+            if "C" in raw and "CF" not in raw:
+                return "C"
+            if "SS" in raw:
+                return "SS"
+            if "2B" in raw:
+                return "2B"
+            if "3B" in raw:
+                return "3B"
+            if "1B" in raw:
+                return "1B"
+            if "CF" in raw:
+                return "CF"
+            if "LF" in raw:
+                return "LF"
+            if "RF" in raw:
+                return "RF"
+            return "DH"
+
+        def depth_score_frame(frame: pd.DataFrame, position: str) -> pd.Series:
+            base_score = pd.to_numeric(frame.get("overall_hitter_score"), errors="coerce").fillna(0)
+            if position == "DH":
+                return base_score + pd.to_numeric(frame.get("dh_fit_score"), errors="coerce").fillna(0)
+            return base_score
+
+        def eligible_for_position(frame: pd.DataFrame, position: str, flags: list[str]) -> pd.Series:
+            if position == "DH":
+                return frame["is_hitter"].fillna(False)
+            return frame[flags].fillna(False).any(axis=1)
+
+        active = active.copy()
+        active["depth_primary_position"] = active.apply(primary_position_for_row, axis=1)
+
+        starter_assignments: dict[str, str] = {}
+        used_starters: set[str] = set()
+
+        for position, flags in plans:
+            primary_candidates = active.loc[
+                eligible_for_position(active, position, flags)
+                & active["depth_primary_position"].eq(position)
+                & ~active["player_name"].isin(used_starters)
+            ].copy()
+            if primary_candidates.empty:
+                continue
+            primary_candidates["depth_score"] = depth_score_frame(primary_candidates, position)
+            best_primary = primary_candidates.sort_values(["depth_score", "overall_hitter_score", "ops_val"], ascending=False).iloc[0]
+            starter_assignments[position] = str(best_primary["player_name"])
+            used_starters.add(str(best_primary["player_name"]))
+
+        for position, flags in plans:
+            if position in starter_assignments:
+                continue
+            fallback_candidates = active.loc[
+                eligible_for_position(active, position, flags)
+                & ~active["player_name"].isin(used_starters)
+            ].copy()
+            if fallback_candidates.empty:
+                continue
+            fallback_candidates["depth_score"] = depth_score_frame(fallback_candidates, position)
+            best_fallback = fallback_candidates.sort_values(["depth_score", "overall_hitter_score", "ops_val"], ascending=False).iloc[0]
+            starter_assignments[position] = str(best_fallback["player_name"])
+            used_starters.add(str(best_fallback["player_name"]))
+
+        starter_names = set(starter_assignments.values())
+
+        rows: list[dict[str, object]] = []
+        for position, flags in plans:
+            candidates = active.loc[eligible_for_position(active, position, flags)].copy()
+            candidates["depth_score"] = depth_score_frame(candidates, position)
+
+            if candidates.empty:
+                continue
+
+            starter_name = starter_assignments.get(position)
+            if starter_name:
+                starter_row = candidates.loc[candidates["player_name"].eq(starter_name)].copy()
+                remaining_rows = candidates.loc[~candidates["player_name"].eq(starter_name)].copy()
+                # Keep starters from occupying backup slots at other positions.
+                remaining_rows = remaining_rows.loc[~remaining_rows["player_name"].isin(starter_names)]
+                remaining_rows = remaining_rows.sort_values(["depth_score", "overall_hitter_score", "ops_val"], ascending=False)
+                candidates = pd.concat([starter_row, remaining_rows], ignore_index=True).head(depth_per_position)
+            else:
+                candidates = candidates.sort_values(["depth_score", "overall_hitter_score", "ops_val"], ascending=False).head(depth_per_position)
+
+            for rank, (_, row) in enumerate(candidates.iterrows(), start=1):
+                pa_val = pd.to_numeric(pd.Series([row.get("pa_val")]), errors="coerce").fillna(0).iloc[0]
+                score_val = pd.to_numeric(pd.Series([row.get("depth_score")]), errors="coerce").fillna(0).iloc[0]
+                rows.append(
+                    {
+                        "position": position,
+                        "rank": rank,
+                        "player_name": row.get("player_name", ""),
+                        "listed_position": row.get("primary_position", ""),
+                        "bats": row.get("bats", ""),
+                        "throws": row.get("throws", ""),
+                        "pa": int(round(float(pa_val))),
+                        "ops": pd.to_numeric(row.get("ops_val"), errors="coerce"),
+                        "score": float(score_val),
+                    }
+                )
+
+        if not rows:
+            return pd.DataFrame(
+                columns=["position", "rank", "player_name", "listed_position", "bats", "throws", "pa", "ops", "score"]
+            )
+
+        depth_chart = pd.DataFrame(rows)
+        depth_chart["ops"] = pd.to_numeric(depth_chart["ops"], errors="coerce").round(3)
+        depth_chart["score"] = pd.to_numeric(depth_chart["score"], errors="coerce").round(2)
+        return depth_chart
 
     @staticmethod
     def _build_aaa_hitter_dashboard(df: pd.DataFrame) -> pd.DataFrame:
