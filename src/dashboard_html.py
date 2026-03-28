@@ -144,6 +144,8 @@ def build_html_shell(
       color: #f9f7f1;
       border-radius: 24px;
       padding: 28px;
+      padding-right: 190px;
+      position: relative;
       box-shadow: var(--shadow);
     }}
     .hero h1 {{
@@ -164,8 +166,9 @@ def build_html_shell(
       line-height: 1.55;
     }}
         .hero-date {{
-            margin-top: 10px;
-            display: inline-block;
+          margin-top: 0;
+          display: inline-flex;
+          align-items: center;
             padding: 6px 12px;
             border-radius: 999px;
             border: 1px solid rgba(249, 247, 241, 0.24);
@@ -173,6 +176,9 @@ def build_html_shell(
             color: rgba(249, 247, 241, 0.96);
             font-size: 0.9rem;
             letter-spacing: 0.03em;
+          position: absolute;
+          top: 18px;
+          right: 20px;
         }}
     .top-nav {{
       display: flex;
@@ -477,7 +483,12 @@ def build_html_shell(
       }}
       .hero {{
         padding: 22px;
+        padding-right: 22px;
         border-radius: 20px;
+      }}
+      .hero-date {{
+        position: static;
+        margin-top: 10px;
       }}
       .section-card {{
         padding: 18px;
