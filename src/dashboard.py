@@ -7,7 +7,7 @@ import pandas as pd
 
 from src.data_processing import CsvRepository, PlayerDataTransformer
 from src.dashboard_html import build_html_shell, html_table as render_html_table
-from src.dashboard_types import DashboardOutputs
+from src.dashboard_types import DashboardOutputs, DashboardSection
 from src.dashboard_utils import (
     format_ip_columns,
     md_table,
@@ -21,8 +21,10 @@ from src.dashboard_sections import (
     build_active_depth_chart,
     build_hitter_dashboard,
     build_hitter_standard_stats,
+    build_hitter_toggle_dashboard,
     build_pitcher_dashboard,
     build_pitcher_standard_stats,
+    build_pitcher_toggle_dashboard,
 )
 from src.dashboard_writers import DashboardOutputWriter
 from src.metrics import MetricsCalculator
@@ -84,12 +86,18 @@ class DashboardGenerator:
         allow_html: bool = False,
         sortable: bool = True,
         highlight_starters: bool = False,
+        column_modes: dict[str, list[str]] | None = None,
+        column_labels: dict[str, str] | None = None,
+        default_mode: str | None = None,
     ) -> str:
         return render_html_table(
             df,
             allow_html=allow_html,
             sortable=sortable,
             highlight_starters=highlight_starters,
+            column_modes=column_modes,
+            column_labels=column_labels,
+            default_mode=default_mode,
         )
 
     @staticmethod
@@ -134,30 +142,79 @@ class DashboardGenerator:
                         active_page=active_page,
                 )
 
-    def _output_sections(self, outputs: DashboardOutputs) -> list[tuple[str, pd.DataFrame, str | None]]:
+    def _output_sections(self, outputs: DashboardOutputs) -> list[DashboardSection]:
         frames = getattr(self, "_latest_frames", {})
-        mlb_hitters_stats = self._build_hitter_standard_stats(frames.get("mlb_hitters", pd.DataFrame()))
-        mlb_pitchers_stats = self._build_pitcher_standard_stats(frames.get("mlb_pitchers", pd.DataFrame()))
-        aaa_hitters_stats = self._build_hitter_standard_stats(frames.get("aaa_hitters", pd.DataFrame()))
-        aaa_pitchers_stats = self._build_pitcher_standard_stats(frames.get("aaa_pitchers", pd.DataFrame()))
         mlb_depth_chart = self._build_active_depth_chart(frames.get("mlb_hitters", pd.DataFrame()))
+        mlb_hitters_toggle_df, mlb_hitters_modes, mlb_hitters_labels = build_hitter_toggle_dashboard(
+            frames.get("mlb_hitters", pd.DataFrame()),
+            "overall_hitter_score",
+        )
+        mlb_pitchers_toggle_df, mlb_pitchers_modes, mlb_pitchers_labels = build_pitcher_toggle_dashboard(
+            frames.get("mlb_pitchers", pd.DataFrame()),
+            "score",
+        )
+        aaa_hitters_toggle_df, aaa_hitters_modes, aaa_hitters_labels = build_hitter_toggle_dashboard(
+            frames.get("aaa_hitters", pd.DataFrame()),
+            "projection_hitter_score",
+            include_potential=True,
+        )
+        aaa_pitchers_toggle_df, aaa_pitchers_modes, aaa_pitchers_labels = build_pitcher_toggle_dashboard(
+            frames.get("aaa_pitchers", pd.DataFrame()),
+            "projection_pitcher_score",
+            include_potential=True,
+        )
+
+        mlb_hitters_toggle_df = self._format_ip_columns(self._round_score_columns(mlb_hitters_toggle_df))
+        mlb_pitchers_toggle_df = self._format_ip_columns(self._round_score_columns(mlb_pitchers_toggle_df))
+        aaa_hitters_toggle_df = self._format_ip_columns(self._round_score_columns(aaa_hitters_toggle_df))
+        aaa_pitchers_toggle_df = self._format_ip_columns(self._round_score_columns(aaa_pitchers_toggle_df))
+        mlb_depth_chart = self._format_ip_columns(self._round_score_columns(mlb_depth_chart))
 
         return [
-            (f"{self.mlb_team_name} hitters - current value", outputs.mlb_hitters_dashboard, "mlb_hitters"),
-            (f"{self.mlb_team_name} pitchers - current value", outputs.mlb_pitchers_dashboard, "mlb_pitchers"),
-            (f"{self.aaa_team_name} hitters - promotion board", outputs.aaa_hitters_dashboard, "aaa_hitters"),
-            (f"{self.aaa_team_name} pitchers - promotion board", outputs.aaa_pitchers_dashboard, "aaa_pitchers"),
-            (f"{self.mlb_team_name} hitting stats", mlb_hitters_stats, "mlb_hitters"),
-            (f"{self.mlb_team_name} pitching stats", mlb_pitchers_stats, "mlb_pitchers"),
-            (f"{self.mlb_team_name} active depth chart", mlb_depth_chart, "mlb_hitters"),
-            (f"{self.aaa_team_name} hitting stats", aaa_hitters_stats, "aaa_hitters"),
-            (f"{self.aaa_team_name} pitching stats", aaa_pitchers_stats, "aaa_pitchers"),
-            ("Recommended lineup vs RHP", outputs.recommended_lineup_vs_rhp, "mlb_hitters"),
-            ("Recommended lineup vs LHP", outputs.recommended_lineup_vs_lhp, "mlb_hitters"),
-            ("Platoon diagnostics", outputs.platoon_diagnostics, "mlb_hitters"),
-            ("Recommended rotation", outputs.recommended_rotation, "mlb_pitchers"),
-            ("Bullpen roles", outputs.recommended_bullpen_roles, "mlb_pitchers"),
-            ("Recommended transactions", outputs.recommended_transactions, None),
+            DashboardSection(
+                title=f"{self.mlb_team_name} hitters",
+                df=mlb_hitters_toggle_df,
+                group="mlb_hitters",
+                column_modes=mlb_hitters_modes,
+                column_labels=mlb_hitters_labels,
+                default_mode="current",
+            ),
+            DashboardSection(
+                title=f"{self.mlb_team_name} pitchers",
+                df=mlb_pitchers_toggle_df,
+                group="mlb_pitchers",
+                column_modes=mlb_pitchers_modes,
+                column_labels=mlb_pitchers_labels,
+                default_mode="current",
+            ),
+            DashboardSection(
+                title=f"{self.aaa_team_name} hitters",
+                df=aaa_hitters_toggle_df,
+                group="aaa_hitters",
+                column_modes=aaa_hitters_modes,
+                column_labels=aaa_hitters_labels,
+                default_mode="current",
+            ),
+            DashboardSection(
+                title=f"{self.aaa_team_name} pitchers",
+                df=aaa_pitchers_toggle_df,
+                group="aaa_pitchers",
+                column_modes=aaa_pitchers_modes,
+                column_labels=aaa_pitchers_labels,
+                default_mode="current",
+            ),
+            DashboardSection(
+                title=f"{self.mlb_team_name} active depth chart",
+                df=mlb_depth_chart,
+                group="mlb_hitters",
+                highlight_starters=True,
+            ),
+            DashboardSection(title="Recommended lineup vs RHP", df=outputs.recommended_lineup_vs_rhp, group="mlb_hitters"),
+            DashboardSection(title="Recommended lineup vs LHP", df=outputs.recommended_lineup_vs_lhp, group="mlb_hitters"),
+            DashboardSection(title="Platoon diagnostics", df=outputs.platoon_diagnostics, group="mlb_hitters"),
+            DashboardSection(title="Recommended rotation", df=outputs.recommended_rotation, group="mlb_pitchers"),
+            DashboardSection(title="Bullpen roles", df=outputs.recommended_bullpen_roles, group="mlb_pitchers"),
+            DashboardSection(title="Recommended transactions", df=outputs.recommended_transactions, group=None),
         ]
 
     @staticmethod

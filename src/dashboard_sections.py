@@ -3,6 +3,104 @@ from __future__ import annotations
 import pandas as pd
 
 
+def build_hitter_toggle_dashboard(
+    df: pd.DataFrame,
+    score_col: str,
+    include_potential: bool = False,
+) -> tuple[pd.DataFrame, dict[str, list[str]], dict[str, str]]:
+    int_stats_cols = ["g", "stats_pa", "ab", "h", "2b", "3b", "hr", "rbi", "r", "bb", "k", "sb", "cs"]
+    current_cols = [
+        "cv_pa",
+        "cv_obp",
+        "cv_slg",
+        "cv_ops",
+        "contact_now",
+        "power_now",
+        "eye_now",
+    ]
+    if include_potential:
+        current_cols.extend(["contact_pot", "power_pot", "eye_pot"])
+    current_cols.extend(["score", "injury_text"])
+    stats_cols = [
+        "g",
+        "stats_pa",
+        "ab",
+        "h",
+        "2b",
+        "3b",
+        "hr",
+        "rbi",
+        "r",
+        "bb",
+        "k",
+        "sb",
+        "cs",
+        "avg",
+        "stats_obp",
+        "stats_slg",
+        "stats_ops",
+        "war",
+    ]
+    labels = {
+        "player_name": "player_name",
+        "primary_position": "pos",
+        "cv_pa": "pa",
+        "cv_obp": "obp",
+        "cv_slg": "slg",
+        "cv_ops": "ops",
+        "contact_now": "contact_now",
+        "power_now": "power_now",
+        "eye_now": "eye_now",
+        "contact_pot": "contact_pot",
+        "power_pot": "power_pot",
+        "eye_pot": "eye_pot",
+        "score": "score",
+        "g": "g",
+        "stats_pa": "pa",
+        "ab": "ab",
+        "h": "h",
+        "2b": "2b",
+        "3b": "3b",
+        "hr": "hr",
+        "rbi": "rbi",
+        "r": "r",
+        "bb": "bb",
+        "k": "k",
+        "sb": "sb",
+        "cs": "cs",
+        "avg": "avg",
+        "stats_obp": "obp",
+        "stats_slg": "slg",
+        "stats_ops": "ops",
+        "war": "war",
+        "injury_text": "injury_text",
+    }
+    display_columns = ["player_name", "primary_position", *current_cols, *stats_cols]
+    if df.empty:
+        return pd.DataFrame(columns=display_columns), {"current": current_cols, "stats": stats_cols}, labels
+    display = (
+        df.loc[df["is_hitter"] & (df["pa_val"] > 0)]
+        .sort_values(score_col, ascending=False)
+        .assign(
+            cv_pa=lambda x: x["pa_val"].fillna(0).round().astype(int),
+            stats_pa=lambda x: x["pa"].fillna(0).round().astype(int),
+            cv_obp=lambda x: x["obp_val"],
+            cv_slg=lambda x: x["slg_val"],
+            cv_ops=lambda x: x["ops_val"],
+            stats_obp=lambda x: x["obp"],
+            stats_slg=lambda x: x["slg"],
+            stats_ops=lambda x: x["ops"],
+            score=lambda x: x[score_col],
+        )[display_columns]
+        .head(15)
+        .copy()
+    )
+    for col in int_stats_cols:
+        if col in display.columns:
+            display[col] = pd.to_numeric(display[col], errors="coerce").fillna(0).round().astype(int)
+    return display, {"current": current_cols, "stats": stats_cols}, labels
+
+
 def build_hitter_dashboard(df: pd.DataFrame, score_col: str) -> pd.DataFrame:
     cols = [
         "player_name",
@@ -289,6 +387,103 @@ def build_pitcher_standard_stats(df: pd.DataFrame) -> pd.DataFrame:
     for col in int_cols:
         stats[col] = stats[col].fillna(0).round().astype(int)
     return stats
+
+
+def build_pitcher_toggle_dashboard(
+    df: pd.DataFrame,
+    score_col: str,
+    include_potential: bool = False,
+) -> tuple[pd.DataFrame, dict[str, list[str]], dict[str, str]]:
+    int_stats_cols = ["g", "gs", "w", "l", "sv", "hld", "ha", "hr", "er", "bb", "k"]
+    current_cols = [
+        "cv_ip",
+        "cv_era",
+        "cv_fip",
+        "cv_whip",
+        "stuff_now",
+        "movement_now",
+        "control_now",
+    ]
+    if include_potential:
+        current_cols.extend(["stuff_pot", "movement_pot", "control_pot"])
+    current_cols.extend(["score", "injury_text"])
+    stats_cols = [
+        "g",
+        "gs",
+        "w",
+        "l",
+        "sv",
+        "hld",
+        "stats_ip",
+        "ha",
+        "hr",
+        "er",
+        "bb",
+        "k",
+        "era",
+        "fip",
+        "whip",
+        "k_9",
+        "bb_9",
+        "hr_9",
+        "war",
+    ]
+    labels = {
+        "player_name": "player_name",
+        "primary_position": "pos",
+        "cv_ip": "ip",
+        "cv_era": "era",
+        "cv_fip": "fip",
+        "cv_whip": "whip",
+        "stuff_now": "stuff_now",
+        "movement_now": "movement_now",
+        "control_now": "control_now",
+        "stuff_pot": "stuff_pot",
+        "movement_pot": "movement_pot",
+        "control_pot": "control_pot",
+        "score": "score",
+        "g": "g",
+        "gs": "gs",
+        "w": "w",
+        "l": "l",
+        "sv": "sv",
+        "hld": "hld",
+        "stats_ip": "ip",
+        "ha": "ha",
+        "hr": "hr",
+        "er": "er",
+        "bb": "bb",
+        "k": "k",
+        "era": "era",
+        "fip": "fip",
+        "whip": "whip",
+        "k_9": "k_9",
+        "bb_9": "bb_9",
+        "hr_9": "hr_9",
+        "war": "war",
+        "injury_text": "injury_text",
+    }
+    display_columns = ["player_name", "primary_position", *current_cols, *stats_cols]
+    if df.empty:
+        return pd.DataFrame(columns=display_columns), {"current": current_cols, "stats": stats_cols}, labels
+    display = (
+        df.loc[df["is_pitcher"] & (df["ip_val"] > 0)]
+        .sort_values(score_col, ascending=False)
+        .assign(
+            cv_ip=lambda x: x["ip_val"],
+            cv_era=lambda x: x["era_val"],
+            cv_fip=lambda x: x["fip_val"],
+            cv_whip=lambda x: x["whip_val"],
+            stats_ip=lambda x: x["ip"],
+            score=lambda x: x[score_col],
+        )[display_columns]
+        .head(15)
+        .copy()
+    )
+    for col in int_stats_cols:
+        if col in display.columns:
+            display[col] = pd.to_numeric(display[col], errors="coerce").fillna(0).round().astype(int)
+    return display, {"current": current_cols, "stats": stats_cols}, labels
 
 
 def build_pitcher_dashboard(df: pd.DataFrame, score_col: str, include_potential: bool = False) -> pd.DataFrame:

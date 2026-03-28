@@ -6,6 +6,17 @@ import pandas as pd
 
 
 @dataclass
+class DashboardSection:
+    title: str
+    df: pd.DataFrame
+    group: str | None = None
+    column_modes: dict[str, list[str]] | None = None
+    column_labels: dict[str, str] | None = None
+    default_mode: str | None = None
+    highlight_starters: bool = False
+
+
+@dataclass
 class DashboardOutputs:
     mlb_hitters_dashboard: pd.DataFrame
     mlb_pitchers_dashboard: pd.DataFrame

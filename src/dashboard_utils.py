@@ -30,7 +30,11 @@ def format_ip_columns(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     formatted = df.copy()
-    ip_cols = [c for c in formatted.columns if str(c).lower() in {"ip", "innings_pitched"}]
+    ip_cols = [
+        c
+        for c in formatted.columns
+        if str(c).lower() in {"ip", "innings_pitched", "cv_ip", "stats_ip"}
+    ]
     if not ip_cols:
         return formatted
 

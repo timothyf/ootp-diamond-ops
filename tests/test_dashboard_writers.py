@@ -8,6 +8,7 @@ from unittest.mock import Mock
 import pandas as pd
 
 from src.dashboard_types import DashboardOutputs
+from src.dashboard_types import DashboardSection
 from src.dashboard_utils import slugify
 from src.dashboard_writers import DashboardOutputWriter
 
@@ -38,19 +39,40 @@ def _sample_outputs() -> DashboardOutputs:
 
 class DashboardWriterTests(unittest.TestCase):
     def _build_writer(self, out_dir: Path, round_mock: Mock, ip_mock: Mock) -> DashboardOutputWriter:
-        def html_table(df: pd.DataFrame, allow_html: bool = False, sortable: bool = True, highlight_starters: bool = False) -> str:
+        def html_table(
+            df: pd.DataFrame,
+            allow_html: bool = False,
+            sortable: bool = True,
+            highlight_starters: bool = False,
+            column_modes: dict[str, list[str]] | None = None,
+            column_labels: dict[str, str] | None = None,
+            default_mode: str | None = None,
+        ) -> str:
             names = ",".join(df["player_name"].astype(str).tolist()) if "player_name" in df.columns else ""
-            return f"<table data-highlight='{highlight_starters}'>{names}</table>"
+            toggle = f" mode={default_mode}" if column_modes else ""
+            return f"<table data-highlight='{highlight_starters}'{toggle}>{names}</table>"
 
         def html_shell(title: str, body: str, active_page: str | None = None) -> str:
             return f"<html><title>{title}</title><body data-page='{active_page}'>{body}</body></html>"
 
         def output_sections(outputs: DashboardOutputs):
             return [
-                ("Detroit hitters - current value", outputs.mlb_hitters_dashboard, "mlb_hitters"),
-                ("Toledo hitters - promotion board", outputs.aaa_hitters_dashboard, "aaa_hitters"),
-                ("Detroit active depth chart", pd.DataFrame([{"position": "C", "rank": 1, "player_name": "Alice"}]), "mlb_hitters"),
-                ("Recommended transactions", outputs.recommended_transactions, None),
+                DashboardSection(
+                    title="Detroit hitters",
+                    df=outputs.mlb_hitters_dashboard,
+                    group="mlb_hitters",
+                    column_modes={"current": ["score"]},
+                    column_labels={"score": "score"},
+                    default_mode="current",
+                ),
+                DashboardSection(title="Toledo hitters", df=outputs.aaa_hitters_dashboard, group="aaa_hitters"),
+                DashboardSection(
+                    title="Detroit active depth chart",
+                    df=pd.DataFrame([{"position": "C", "rank": 1, "player_name": "Alice"}]),
+                    group="mlb_hitters",
+                    highlight_starters=True,
+                ),
+                DashboardSection(title="Recommended transactions", df=outputs.recommended_transactions, group=None),
             ]
 
         def link_player_names(df: pd.DataFrame, links: dict[str, str]) -> pd.DataFrame:
@@ -112,7 +134,9 @@ class DashboardWriterTests(unittest.TestCase):
             team_html = (out_dir / "detroit_team.html").read_text(encoding="utf-8")
             depth_chart_html = (out_dir / "detroit_active_depth_chart.html").read_text(encoding="utf-8")
 
-            self.assertIn("Detroit hitters - current value", dashboard_html)
+            self.assertIn("Detroit hitters", dashboard_html)
+            self.assertIn("section-card-compact", dashboard_html)
+            self.assertNotIn("mode=current", dashboard_html)
             self.assertIn("Detroit Team", team_html)
             self.assertIn("data-highlight='True'", depth_chart_html)
 

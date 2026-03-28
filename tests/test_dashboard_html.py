@@ -21,11 +21,20 @@ class DashboardHtmlTests(unittest.TestCase):
                 }
             ]
         )
-        rendered = html_table(df, sortable=False, highlight_starters=True)
+        rendered = html_table(
+            df,
+            sortable=False,
+            highlight_starters=True,
+            column_modes={"current": ["rank"]},
+            column_labels={"primary_position": "pos", "rank": "rank"},
+            default_mode="current",
+        )
 
         self.assertIn('data-sortable="false"', rendered)
         self.assertIn('data-highlight-starters="true"', rendered)
-        self.assertIn("<th>position</th>", rendered)
+        self.assertIn(">pos</th>", rendered)
+        self.assertIn('data-default-mode="current"', rendered)
+        self.assertIn("table-toggle-group", rendered)
 
     def test_build_html_shell_includes_nav_date_and_active_page(self) -> None:
         html = build_html_shell(
@@ -44,6 +53,7 @@ class DashboardHtmlTests(unittest.TestCase):
         self.assertIn('class="is-active" href="toledo_mud_hens_team.html"', html)
         self.assertIn("OOTP Date: Unknown", html)
         self.assertIn("const tables = document.querySelectorAll('table.data-table')", html)
+        self.assertIn("applyColumnMode", html)
 
 
 if __name__ == "__main__":

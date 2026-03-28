@@ -4,10 +4,135 @@ import unittest
 
 import pandas as pd
 
-from src.dashboard_sections import build_active_depth_chart, build_hitter_dashboard
+from src.dashboard_sections import (
+    build_active_depth_chart,
+    build_hitter_dashboard,
+    build_hitter_toggle_dashboard,
+    build_pitcher_toggle_dashboard,
+)
+from src.dashboard_utils import format_ip_columns
 
 
 class DashboardSectionsTests(unittest.TestCase):
+    def test_build_hitter_toggle_dashboard_formats_counting_stats_as_integers(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "player_name": "Slugger",
+                    "primary_position": "1B",
+                    "is_hitter": True,
+                    "pa_val": 18.0,
+                    "obp_val": 0.402,
+                    "slg_val": 0.611,
+                    "ops_val": 1.013,
+                    "contact_now": 60,
+                    "power_now": 70,
+                    "eye_now": 55,
+                    "overall_hitter_score": 8.8,
+                    "g": 12.0,
+                    "pa": 48.0,
+                    "ab": 41.0,
+                    "h": 15.0,
+                    "2b": 4.0,
+                    "3b": 1.0,
+                    "hr": 3.0,
+                    "rbi": 11.0,
+                    "r": 9.0,
+                    "bb": 6.0,
+                    "k": 8.0,
+                    "sb": 2.0,
+                    "cs": 1.0,
+                    "avg": 0.366,
+                    "obp": 0.438,
+                    "slg": 0.707,
+                    "ops": 1.145,
+                    "war": 0.9,
+                    "injury_text": "",
+                }
+            ]
+        )
+
+        result, _, _ = build_hitter_toggle_dashboard(df, "overall_hitter_score")
+
+        self.assertEqual(result.loc[0, "g"], 12)
+        self.assertEqual(result.loc[0, "ab"], 41)
+        self.assertEqual(result.loc[0, "h"], 15)
+        self.assertEqual(result.loc[0, "2b"], 4)
+        self.assertEqual(result.loc[0, "3b"], 1)
+        self.assertEqual(result.loc[0, "hr"], 3)
+        self.assertEqual(result.loc[0, "rbi"], 11)
+        self.assertEqual(result.loc[0, "r"], 9)
+        self.assertEqual(result.loc[0, "bb"], 6)
+        self.assertEqual(result.loc[0, "k"], 8)
+        self.assertEqual(result.loc[0, "sb"], 2)
+        self.assertEqual(result.loc[0, "cs"], 1)
+
+    def test_build_pitcher_toggle_dashboard_formats_counting_stats_as_integers(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "player_name": "Starter",
+                    "primary_position": "SP",
+                    "is_pitcher": True,
+                    "ip_val": 12.0,
+                    "era_val": 3.4,
+                    "fip_val": 3.6,
+                    "whip_val": 1.2,
+                    "stuff_now": 60,
+                    "movement_now": 55,
+                    "control_now": 50,
+                    "score": 7.5,
+                    "g": 5.0,
+                    "gs": 4.0,
+                    "w": 3.0,
+                    "l": 1.0,
+                    "sv": 0.0,
+                    "hld": 0.0,
+                    "ip": 11.1,
+                    "ha": 9.0,
+                    "hr": 1.0,
+                    "er": 4.0,
+                    "bb": 2.0,
+                    "k": 14.0,
+                    "era": 3.27,
+                    "fip": 3.61,
+                    "whip": 1.09,
+                    "k_9": 11.4,
+                    "bb_9": 1.6,
+                    "hr_9": 0.8,
+                    "war": 0.6,
+                    "injury_text": "",
+                }
+            ]
+        )
+
+        result, _, _ = build_pitcher_toggle_dashboard(df, "score")
+
+        self.assertEqual(result.loc[0, "g"], 5)
+        self.assertEqual(result.loc[0, "gs"], 4)
+        self.assertEqual(result.loc[0, "w"], 3)
+        self.assertEqual(result.loc[0, "l"], 1)
+        self.assertEqual(result.loc[0, "sv"], 0)
+        self.assertEqual(result.loc[0, "hld"], 0)
+        self.assertEqual(result.loc[0, "ha"], 9)
+        self.assertEqual(result.loc[0, "hr"], 1)
+        self.assertEqual(result.loc[0, "er"], 4)
+        self.assertEqual(result.loc[0, "bb"], 2)
+        self.assertEqual(result.loc[0, "k"], 14)
+
+    def test_format_ip_columns_converts_toggle_table_ip_columns_to_mlb_notation(self) -> None:
+        df = pd.DataFrame(
+            [
+                {"cv_ip": 5 + (1 / 3), "stats_ip": 7 + (2 / 3)},
+                {"cv_ip": 6.2, "stats_ip": 4.1},
+            ]
+        )
+
+        result = format_ip_columns(df)
+
+        self.assertEqual(result["cv_ip"].tolist(), [5.1, 6.2])
+        self.assertEqual(result["stats_ip"].tolist(), [7.2, 4.1])
+
     def test_build_hitter_dashboard_filters_sorts_and_rounds_pa(self) -> None:
         df = pd.DataFrame(
             [

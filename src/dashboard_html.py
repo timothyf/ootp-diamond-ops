@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 from html import escape
+import re
 
 import pandas as pd
 
 from src.dashboard_utils import slugify
+
+
+def _format_cell_value(value: object, allow_html: bool) -> str:
+    if pd.isna(value):
+        return ""
+    text = str(value)
+    return text if allow_html else escape(text)
 
 
 def html_table(
@@ -12,23 +20,52 @@ def html_table(
     allow_html: bool = False,
     sortable: bool = True,
     highlight_starters: bool = False,
+    column_modes: dict[str, list[str]] | None = None,
+    column_labels: dict[str, str] | None = None,
+    default_mode: str | None = None,
 ) -> str:
     if df.empty:
         return '<p class="empty-state">No rows</p>'
-    display_df = df.rename(columns={"primary_position": "position"})
-    table_html = display_df.to_html(
-        index=False,
-        classes=["data-table"],
-        border=0,
-        escape=not allow_html,
-        table_id="",
-        render_links=False,
-    )
-    return table_html.replace(
-        "<table ",
-        f'<table data-sortable="{"true" if sortable else "false"}" '
-        f'data-highlight-starters="{"true" if highlight_starters else "false"}" ',
-        1,
+
+    column_modes = column_modes or {}
+    column_labels = column_labels or {}
+    mode_lookup = {column: mode for mode, columns in column_modes.items() for column in columns}
+    table_mode = default_mode or (next(iter(column_modes.keys())) if column_modes else "")
+
+    toggle_html = ""
+    if column_modes:
+        buttons = []
+        for mode in column_modes:
+            label = re.sub(r"[_-]+", " ", mode).title()
+            active_class = " is-active" if mode == table_mode else ""
+            buttons.append(
+                f'<button type="button" class="table-toggle{active_class}" data-mode="{escape(mode)}">{escape(label)}</button>'
+            )
+        toggle_html = f'<div class="table-toggle-group">{"".join(buttons)}</div>'
+
+    headers = []
+    for column in df.columns:
+        mode = mode_lookup.get(column, "shared")
+        label = column_labels.get(column, "position" if column == "primary_position" else column)
+        headers.append(
+            f'<th data-column-mode="{escape(mode)}">{escape(str(label))}</th>'
+        )
+
+    rows = []
+    for _, row in df.iterrows():
+        cells = []
+        for column in df.columns:
+            mode = mode_lookup.get(column, "shared")
+            cells.append(
+                f'<td data-column-mode="{escape(mode)}">{_format_cell_value(row[column], allow_html)}</td>'
+            )
+        rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    return (
+        f'{toggle_html}<table class="data-table" data-sortable="{"true" if sortable else "false"}" '
+        f'data-highlight-starters="{"true" if highlight_starters else "false"}" '
+        f'data-default-mode="{escape(table_mode)}"><thead><tr>{"".join(headers)}</tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table>'
     )
 
 
@@ -99,6 +136,9 @@ def build_html_shell(
       margin: 0 auto;
       padding: 24px 0 48px;
     }}
+    .page-dashboard {{
+      width: min(1320px, calc(100% - 32px));
+    }}
     .hero {{
       background: linear-gradient(135deg, rgba(13, 92, 99, 0.97), rgba(18, 56, 63, 0.95));
       color: #f9f7f1;
@@ -110,6 +150,12 @@ def build_html_shell(
       margin: 0 0 8px;
       font-size: clamp(2rem, 4vw, 3.3rem);
       letter-spacing: 0.02em;
+    }}
+    .hero h3 {{
+      margin: 0;
+      font-size: 1.02rem;
+      font-weight: 600;
+      color: rgba(249, 247, 241, 0.78);
     }}
     .hero p {{
       margin: 0;
@@ -157,6 +203,26 @@ def build_html_shell(
       background: var(--link);
       color: #f9f7f1;
     }}
+    .dashboard-overview {{
+      display: grid;
+      gap: 22px;
+    }}
+    .dashboard-group {{
+      display: grid;
+      gap: 12px;
+    }}
+    .dashboard-group-heading {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }}
+    .dashboard-group-heading h2 {{
+      margin: 0;
+      font-size: 1.05rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }}
     .summary-grid {{
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -189,18 +255,65 @@ def build_html_shell(
       display: grid;
       gap: 18px;
     }}
+    .section-grid-overview {{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      align-items: start;
+    }}
     .section-card {{
       padding: 22px;
       overflow: hidden;
+    }}
+    .section-card-compact {{
+      padding: 16px 16px 14px;
+      border-radius: 18px;
+      box-shadow: 0 12px 28px rgba(40, 34, 20, 0.08);
+    }}
+    .section-card-header {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }}
+    .section-kicker {{
+      margin: 0 0 4px;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
     }}
     .section-card h2 {{
       margin: 0 0 8px;
       font-size: 1.55rem;
     }}
+    .section-card-compact h2 {{
+      margin: 0;
+      font-size: 1.15rem;
+      line-height: 1.25;
+    }}
     .section-card p {{
       margin: 0 0 18px;
       color: var(--muted);
       line-height: 1.5;
+    }}
+    .section-meta-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 10px;
+    }}
+    .section-meta-pill {{
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: rgba(13, 92, 99, 0.08);
+      color: var(--accent);
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
     }}
     .table-wrap {{
       overflow-x: auto;
@@ -208,11 +321,51 @@ def build_html_shell(
       border: 1px solid rgba(31, 42, 42, 0.08);
       background: rgba(255, 255, 255, 0.72);
     }}
+    .table-toggle-group {{
+      display: inline-flex;
+      gap: 8px;
+      margin: 0 0 12px;
+      padding: 4px;
+      border-radius: 999px;
+      background: rgba(13, 92, 99, 0.08);
+    }}
+    .table-toggle {{
+      border: 0;
+      border-radius: 999px;
+      padding: 8px 14px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+    }}
+    .table-toggle.is-active {{
+      background: var(--link);
+      color: #f9f7f1;
+    }}
+    .is-column-hidden {{
+      display: none;
+    }}
     table.data-table {{
       width: 100%;
       border-collapse: collapse;
       min-width: 720px;
       font-size: 0.95rem;
+    }}
+    .section-card-compact .table-wrap {{
+      border-radius: 14px;
+    }}
+    .section-card-compact .table-toggle-group {{
+      gap: 6px;
+      margin-bottom: 8px;
+      padding: 3px;
+    }}
+    .section-card-compact .table-toggle {{
+      padding: 6px 10px;
+      font-size: 0.82rem;
+    }}
+    .section-card-compact table.data-table {{
+      min-width: 460px;
+      font-size: 0.86rem;
     }}
     .data-table thead th {{
       position: sticky;
@@ -238,6 +391,10 @@ def build_html_shell(
       border-bottom: 1px solid rgba(31, 42, 42, 0.08);
       text-align: left;
       vertical-align: top;
+    }}
+    .section-card-compact .data-table th,
+    .section-card-compact .data-table td {{
+      padding: 8px 10px;
     }}
     .data-table tbody tr:nth-child(even) {{
       background: rgba(13, 92, 99, 0.03);
@@ -265,6 +422,12 @@ def build_html_shell(
       color: var(--link);
       font-weight: bold;
       text-decoration: none;
+    }}
+    .section-link-inline,
+    .section-link-inline:visited {{
+      margin-top: 0;
+      white-space: nowrap;
+      font-size: 0.88rem;
     }}
     .section-link:hover {{
       color: var(--link-hover);
@@ -309,6 +472,9 @@ def build_html_shell(
       .page {{
         width: min(100% - 20px, 1200px);
       }}
+      .page-dashboard {{
+        width: min(100% - 20px, 1320px);
+      }}
       .hero {{
         padding: 22px;
         border-radius: 20px;
@@ -316,14 +482,20 @@ def build_html_shell(
       .section-card {{
         padding: 18px;
       }}
+      .section-grid-overview {{
+        grid-template-columns: 1fr;
+      }}
       table.data-table {{
         min-width: 640px;
+      }}
+      .section-card-compact table.data-table {{
+        min-width: 420px;
       }}
     }}
   </style>
 </head>
 <body>
-  <main class="page">
+  <main class="page page-{escape(active_page or 'default')}">
     <section class="hero">
       <h1>{escape(title)}</h1>
       <h3>Baseball Operations Dashboard for OOTP</h3>
@@ -335,6 +507,16 @@ def build_html_shell(
 </body>
 <script>
 (() => {{
+    const applyColumnMode = (table, mode) => {{
+        const cells = table.querySelectorAll('[data-column-mode]');
+        cells.forEach((cell) => {{
+            const cellMode = (cell.dataset.columnMode || 'shared').toLowerCase();
+            const shouldShow = cellMode === 'shared' || !mode || cellMode === mode.toLowerCase();
+            cell.classList.toggle('is-column-hidden', !shouldShow);
+        }});
+        table.dataset.activeMode = mode || '';
+    }};
+
     const tables = document.querySelectorAll('table.data-table');
 
     const parseValue = (raw) => {{
@@ -350,6 +532,24 @@ def build_html_shell(
     }};
 
     tables.forEach((table) => {{
+        const toggleGroup = table.previousElementSibling && table.previousElementSibling.classList.contains('table-toggle-group')
+            ? table.previousElementSibling
+            : null;
+        if (toggleGroup) {{
+            const defaultMode = table.dataset.defaultMode || '';
+            applyColumnMode(table, defaultMode);
+            Array.from(toggleGroup.querySelectorAll('.table-toggle')).forEach((button) => {{
+                if ((button.dataset.mode || '') === defaultMode) {{
+                    button.classList.add('is-active');
+                }}
+                button.addEventListener('click', () => {{
+                    Array.from(toggleGroup.querySelectorAll('.table-toggle')).forEach((item) => item.classList.remove('is-active'));
+                    button.classList.add('is-active');
+                    applyColumnMode(table, button.dataset.mode || '');
+                }});
+            }});
+        }}
+
         if ((table.dataset.highlightStarters || 'false').toLowerCase() === 'true') {{
             const tbody = table.tBodies && table.tBodies[0];
             if (tbody) {{
