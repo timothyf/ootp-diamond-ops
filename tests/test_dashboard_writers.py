@@ -133,12 +133,17 @@ class DashboardWriterTests(unittest.TestCase):
             dashboard_html = (out_dir / "dashboard.html").read_text(encoding="utf-8")
             team_html = (out_dir / "detroit_team.html").read_text(encoding="utf-8")
             depth_chart_html = (out_dir / "detroit_active_depth_chart.html").read_text(encoding="utf-8")
+            scoring_html = (out_dir / "scoring_info.html").read_text(encoding="utf-8")
 
             self.assertIn("Detroit hitters", dashboard_html)
             self.assertIn("section-card-compact", dashboard_html)
             self.assertNotIn("mode=current", dashboard_html)
             self.assertIn("Detroit Team", team_html)
             self.assertIn("data-highlight='True'", depth_chart_html)
+            self.assertIn("Score Breakdown Guide", scoring_html)
+            self.assertIn("Formula Weight Shares", scoring_html)
+            self.assertIn("Empirical Normalized Shares", scoring_html)
+            self.assertIn("Hitters analyzed", scoring_html)
 
 
 if __name__ == "__main__":

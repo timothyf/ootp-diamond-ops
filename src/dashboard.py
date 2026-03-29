@@ -50,9 +50,15 @@ class DashboardGenerator:
 
         self.repository = repository or CsvRepository(self.data_dir)
 
-        default_mlb_prefix, default_aaa_prefix = self._discover_team_file_prefixes()
-        mlb_prefix = str(getattr(self.repository, "mlb_file_prefix", default_mlb_prefix)).strip() or default_mlb_prefix
-        aaa_prefix = str(getattr(self.repository, "aaa_file_prefix", default_aaa_prefix)).strip() or default_aaa_prefix
+        repo_has_team_prefixes = hasattr(self.repository, "mlb_file_prefix") and hasattr(self.repository, "aaa_file_prefix")
+        if repo_has_team_prefixes:
+            # DB repositories provide explicit team prefixes; avoid scanning CSV files in this mode.
+            mlb_prefix = str(getattr(self.repository, "mlb_file_prefix", "")).strip() or "mlb"
+            aaa_prefix = str(getattr(self.repository, "aaa_file_prefix", "")).strip() or "aaa"
+        else:
+            default_mlb_prefix, default_aaa_prefix = self._discover_team_file_prefixes()
+            mlb_prefix = str(getattr(self.repository, "mlb_file_prefix", default_mlb_prefix)).strip() or default_mlb_prefix
+            aaa_prefix = str(getattr(self.repository, "aaa_file_prefix", default_aaa_prefix)).strip() or default_aaa_prefix
 
         self.mlb_batting_filename = f"{mlb_prefix}_batting.csv"
         self.mlb_pitching_filename = f"{mlb_prefix}_pitching.csv"

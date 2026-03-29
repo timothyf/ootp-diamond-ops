@@ -92,6 +92,7 @@ def build_html_shell(
             f"{aaa_home_slug}.html",
             f"{aaa_team_name}",
         ),
+        ("scoring_info", "scoring_info.html", "Scoring"),
         ("recommended_transactions", "recommended_transactions.html", "Transactions"),
     ]
     nav_links = "".join(

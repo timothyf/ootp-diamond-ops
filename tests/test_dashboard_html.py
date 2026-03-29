@@ -50,6 +50,7 @@ class DashboardHtmlTests(unittest.TestCase):
         self.assertIn("dashboard.html", html)
         self.assertIn("detroit_tigers_team.html", html)
         self.assertIn("toledo_mud_hens_team.html", html)
+        self.assertIn("scoring_info.html", html)
         self.assertIn('class="is-active" href="toledo_mud_hens_team.html"', html)
         self.assertIn("OOTP Date: Unknown", html)
         self.assertIn("const tables = document.querySelectorAll('table.data-table')", html)
