@@ -21,6 +21,7 @@ from src.dashboard_sections import (
     build_active_depth_chart,
     build_hitter_dashboard,
     build_hitter_standard_stats,
+    build_team_needs,
     build_hitter_toggle_dashboard,
     build_pitcher_dashboard,
     build_pitcher_standard_stats,
@@ -77,6 +78,11 @@ class DashboardGenerator:
 
         export_date = self.repository.get_export_date() if hasattr(self.repository, "get_export_date") else None
         self.ootp_export_date = str(export_date).strip() if export_date else None
+        self.team_header_summaries = (
+            self.repository.get_team_header_summaries()
+            if hasattr(self.repository, "get_team_header_summaries")
+            else {"mlb": None, "aaa": None}
+        )
         self.transformer = transformer or PlayerDataTransformer()
         self.metrics = metrics or MetricsCalculator(self.transformer)
         self.lineup_planner = lineup_planner or LineupPlanner()
@@ -139,14 +145,15 @@ class DashboardGenerator:
         return "mlb", "aaa"
 
     def _html_shell(self, title: str, body: str, active_page: str | None = None) -> str:
-                return build_html_shell(
-                        title=title,
-                        body=body,
-                        mlb_team_name=self.mlb_team_name,
-                        aaa_team_name=self.aaa_team_name,
-                        ootp_export_date=self.ootp_export_date,
-                        active_page=active_page,
-                )
+        return build_html_shell(
+            title=title,
+            body=body,
+            mlb_team_name=self.mlb_team_name,
+            aaa_team_name=self.aaa_team_name,
+            ootp_export_date=self.ootp_export_date,
+            team_header_summaries=self.team_header_summaries,
+            active_page=active_page,
+        )
 
     def _output_sections(self, outputs: DashboardOutputs) -> list[DashboardSection]:
         frames = getattr(self, "_latest_frames", {})
@@ -175,6 +182,12 @@ class DashboardGenerator:
         aaa_hitters_toggle_df = self._format_ip_columns(self._round_score_columns(aaa_hitters_toggle_df))
         aaa_pitchers_toggle_df = self._format_ip_columns(self._round_score_columns(aaa_pitchers_toggle_df))
         mlb_depth_chart = self._format_ip_columns(self._round_score_columns(mlb_depth_chart))
+        team_needs_df = build_team_needs(
+            frames.get("mlb_hitters", pd.DataFrame()),
+            frames.get("aaa_hitters", pd.DataFrame()),
+            frames.get("mlb_pitchers", pd.DataFrame()),
+            frames.get("aaa_pitchers", pd.DataFrame()),
+        )
 
         return [
             DashboardSection(
@@ -215,6 +228,7 @@ class DashboardGenerator:
                 group="mlb_hitters",
                 highlight_starters=True,
             ),
+            DashboardSection(title="Team needs", df=team_needs_df, group="mlb_team"),
             DashboardSection(title="Recommended lineup vs RHP", df=outputs.recommended_lineup_vs_rhp, group="mlb_hitters"),
             DashboardSection(title="Recommended lineup vs LHP", df=outputs.recommended_lineup_vs_lhp, group="mlb_hitters"),
             DashboardSection(title="Platoon diagnostics", df=outputs.platoon_diagnostics, group="mlb_hitters"),

@@ -285,6 +285,8 @@ class DashboardOutputWriter:
 
     @staticmethod
     def _overview_group_label(section: DashboardSection) -> str:
+        if section.title == "Team needs":
+            return "Decisions"
         if section.title == "Recommended transactions":
             return "Decisions"
         if section.group == "mlb_hitters":
@@ -306,8 +308,101 @@ class DashboardOutputWriter:
         return 5
 
     @staticmethod
+    def _section_description(section: DashboardSection) -> str | None:
+        lineup_description = (
+            "This lineup first locks in the best healthy regulars at the premium defensive spots, "
+            "then compares the best first base, left field, right field, and DH combinations for that "
+            "pitcher handedness, giving extra credit to hitters whose handedness and split profile fit "
+            "the matchup well. After the nine players are chosen, the batting "
+            "order is set from role-based scores: the best leadoff candidate goes first, the best "
+            "remaining top-of-order fit goes second, the strongest overall middle-of-order bat fills "
+            "the three spot, the best cleanup fit hits fourth, and the remaining hitters are ordered "
+            "by overall value and offensive profile."
+        )
+        descriptions = {
+            "Recommended lineup vs RHP": lineup_description,
+            "Recommended lineup vs LHP": lineup_description,
+            "Team needs": (
+                "This page highlights the club's most urgent acquisition needs by comparing the current MLB roster "
+                "with AAA depth using current scores, projection scores, recent production, age, and handedness. "
+                "Each row points to a roster area where external help could most meaningfully improve the organization."
+            ),
+            "Recommended rotation": (
+                "This rotation ranks pitchers by overall staff value, then gives extra credit to "
+                "starters who have built real innings, made starts, and shown the stamina to turn "
+                "a lineup over multiple times. The final order favors the best true starters first, "
+                "with swingman depth filling in after the core rotation arms."
+            ),
+            "Bullpen roles": (
+                "These bullpen roles start from each pitcher's overall staff value, then add relief-"
+                "specific credit for saves, holds, and a true reliever profile. The highest-rated "
+                "late-inning relievers rise to the top, while the remaining arms are slotted beneath "
+                "them based on overall bullpen fit."
+            ),
+        }
+        return descriptions.get(section.title)
+
+    def _rotation_candidate_table(self, frames: dict[str, pd.DataFrame], player_links: dict[str, dict[str, str]]) -> str:
+        frame = frames.get("mlb_pitchers", pd.DataFrame()) if isinstance(frames, dict) else pd.DataFrame()
+        if frame.empty:
+            return ""
+
+        pool = frame.loc[frame["is_pitcher"] & ~frame["injured_flag"] & (frame["ip_val"] > 0)].copy()
+        if pool.empty:
+            return ""
+
+        chosen_names = set()
+        rotation_frame = frames.get("_recommended_rotation", pd.DataFrame()) if isinstance(frames, dict) else pd.DataFrame()
+        if isinstance(rotation_frame, pd.DataFrame) and not rotation_frame.empty and "player_name" in rotation_frame.columns:
+            chosen_names = {
+                str(name)
+                for name in rotation_frame["player_name"].tolist()
+                if str(name).strip() and str(name).strip() != "OPEN / BULK ROLE"
+            }
+
+        candidates = pool.loc[
+            ~pool["player_name"].isin(chosen_names)
+            & (pool["true_starter_flag"] | pool["swingman_flag"] | ((pool["gs_val"] >= 1) & (pool["stamina_now"] >= 50)))
+        ].copy()
+        if candidates.empty:
+            return ""
+
+        candidates["candidate_type"] = candidates["true_starter_flag"].map({True: "Starter depth", False: "Swingman / spot start"})
+        candidates = (
+            candidates.sort_values(
+                ["true_starter_flag", "rotation_score", "ip_val", "gs_val"],
+                ascending=[False, False, False, False],
+            )[
+                ["candidate_type", "player_name", "ip_val", "gs_val", "stamina_now", "era_val", "fip_val", "rotation_score"]
+            ]
+            .rename(
+                columns={
+                    "ip_val": "ip",
+                    "gs_val": "gs",
+                    "stamina_now": "stamina",
+                    "era_val": "era",
+                    "fip_val": "fip",
+                }
+            )
+            .head(6)
+            .reset_index(drop=True)
+        )
+        candidates = self.format_ip_columns(self.round_score_columns(candidates))
+        linked_candidates = self.link_player_names(candidates, player_links.get("mlb_pitchers", {}))
+        return f"""
+        <section class="section-card">
+          <h2>Spot Starter / Replacement Candidates</h2>
+          <p>Best healthy MLB options outside the current five-man rotation if you need a spot start or replacement starter.</p>
+          <div class="table-wrap">
+            {self.html_table(linked_candidates, allow_html=True)}
+          </div>
+        </section>
+        """
+
+    @staticmethod
     def _overview_preview_columns(section: DashboardSection) -> list[str] | None:
         preview_columns = {
+            "Team needs": ["priority", "area", "need", "internal_options"],
             "Recommended transactions": ["move_type", "player_name", "possible_replace", "score_gap"],
             "Platoon diagnostics": ["slot", "player_name", "score", "handedness_edge"],
             "Recommended lineup vs RHP": ["slot", "position", "player_name", "obp", "score"],
@@ -361,6 +456,9 @@ class DashboardOutputWriter:
     def _write_html_outputs(self, outputs: DashboardOutputs, frames: dict[str, pd.DataFrame]) -> None:
         sections = self.output_sections(outputs)
         player_links = self.write_player_detail_pages(frames) if isinstance(frames, dict) else {}
+        if isinstance(frames, dict):
+            frames = dict(frames)
+            frames["_recommended_rotation"] = outputs.recommended_rotation.copy()
         mlb_home_slug = self.slugify(f"{self.mlb_team_name} team")
         aaa_home_slug = self.slugify(f"{self.aaa_team_name} team")
 
@@ -493,14 +591,19 @@ class DashboardOutputWriter:
                 active_nav = "recommended_transactions"
             else:
                 active_nav = "dashboard"
+            description = self._section_description(section)
+            extra_body = ""
+            if section.title == "Recommended rotation":
+                extra_body = self._rotation_candidate_table(frames, player_links)
             body = f"""
             <section class="section-card">
               <h2>{escape(section.title)}</h2>
-              <p>{len(section.df)} rows in this report.</p>
+              <p>{escape(description) if description else f"{len(section.df)} rows in this report."}</p>
               <div class="table-wrap">
                                 {self.html_table(linked_df, allow_html=True, highlight_starters=section.highlight_starters, column_modes=section.column_modes, column_labels=section.column_labels, default_mode=section.default_mode)}
               </div>
             </section>
+            {extra_body}
             """
             (self.out_dir / f"{slug}.html").write_text(
                 self.html_shell(section.title, body, active_nav),

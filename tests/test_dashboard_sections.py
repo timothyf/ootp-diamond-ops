@@ -7,6 +7,7 @@ import pandas as pd
 from src.dashboard_sections import (
     build_active_depth_chart,
     build_hitter_dashboard,
+    build_team_needs,
     build_hitter_toggle_dashboard,
     build_pitcher_toggle_dashboard,
 )
@@ -14,6 +15,135 @@ from src.dashboard_utils import format_ip_columns
 
 
 class DashboardSectionsTests(unittest.TestCase):
+    def test_build_team_needs_returns_prioritized_rows(self) -> None:
+        mlb_hitters = pd.DataFrame(
+            [
+                {
+                    "player_name": "Aging Catcher",
+                    "is_hitter": True,
+                    "injured_flag": False,
+                    "status": "Active",
+                    "pa_val": 140,
+                    "overall_hitter_score": 9.5,
+                    "projection_hitter_score": 9.1,
+                    "ops_val": 0.680,
+                    "age_val": 34,
+                    "bats": "R",
+                    "pos_bucket": "C",
+                },
+                {
+                    "player_name": "Corner Bat",
+                    "is_hitter": True,
+                    "injured_flag": False,
+                    "status": "Active",
+                    "pa_val": 220,
+                    "overall_hitter_score": 12.8,
+                    "projection_hitter_score": 12.5,
+                    "ops_val": 0.840,
+                    "age_val": 28,
+                    "bats": "R",
+                    "pos_bucket": "1B",
+                },
+            ]
+        )
+        aaa_hitters = pd.DataFrame(
+            [
+                {
+                    "player_name": "Young Catcher",
+                    "is_hitter": True,
+                    "injured_flag": False,
+                    "status": "Active",
+                    "pa_val": 120,
+                    "projection_hitter_score": 8.8,
+                    "overall_hitter_score": 8.4,
+                    "ops_val": 0.710,
+                    "age_val": 23,
+                    "bats": "R",
+                    "pos_bucket": "C",
+                }
+            ]
+        )
+        mlb_pitchers = pd.DataFrame(
+            [
+                {
+                    "player_name": "Starter One",
+                    "is_pitcher": True,
+                    "injured_flag": False,
+                    "ip_val": 60.0,
+                    "rotation_score": 12.0,
+                    "bullpen_score": 8.0,
+                    "true_starter_flag": True,
+                    "swingman_flag": False,
+                    "true_reliever_flag": False,
+                    "era_val": 3.5,
+                    "age_val": 29,
+                    "throws": "R",
+                    "gs_val": 10,
+                    "stamina_now": 60,
+                },
+                {
+                    "player_name": "Starter Five",
+                    "is_pitcher": True,
+                    "injured_flag": False,
+                    "ip_val": 22.0,
+                    "rotation_score": 8.4,
+                    "bullpen_score": 7.2,
+                    "true_starter_flag": True,
+                    "swingman_flag": False,
+                    "true_reliever_flag": False,
+                    "era_val": 4.8,
+                    "age_val": 31,
+                    "throws": "R",
+                    "gs_val": 4,
+                    "stamina_now": 55,
+                },
+                {
+                    "player_name": "Middle Reliever",
+                    "is_pitcher": True,
+                    "injured_flag": False,
+                    "ip_val": 18.0,
+                    "rotation_score": 7.0,
+                    "bullpen_score": 7.1,
+                    "true_starter_flag": False,
+                    "swingman_flag": False,
+                    "true_reliever_flag": True,
+                    "era_val": 4.1,
+                    "age_val": 28,
+                    "throws": "R",
+                    "gs_val": 0,
+                    "stamina_now": 40,
+                },
+            ]
+        )
+        aaa_pitchers = pd.DataFrame(
+            [
+                {
+                    "player_name": "AAA Starter",
+                    "is_pitcher": True,
+                    "injured_flag": False,
+                    "ip_val": 24.0,
+                    "projection_pitcher_score": 8.7,
+                    "rotation_score": 8.1,
+                    "bullpen_score": 7.5,
+                    "true_starter_flag": True,
+                    "swingman_flag": False,
+                    "true_reliever_flag": False,
+                    "era_val": 4.0,
+                    "age_val": 24,
+                    "throws": "L",
+                    "gs_val": 5,
+                    "stamina_now": 58,
+                }
+            ]
+        )
+
+        result = build_team_needs(mlb_hitters, aaa_hitters, mlb_pitchers, aaa_pitchers)
+
+        self.assertFalse(result.empty)
+        self.assertIn("priority", result.columns)
+        self.assertIn("need", result.columns)
+        self.assertIn("target_profile", result.columns)
+
     def test_build_hitter_toggle_dashboard_formats_counting_stats_as_integers(self) -> None:
         df = pd.DataFrame(
             [

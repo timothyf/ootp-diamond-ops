@@ -72,6 +72,24 @@ class DashboardWriterTests(unittest.TestCase):
                     group="mlb_hitters",
                     highlight_starters=True,
                 ),
+                DashboardSection(
+                    title="Team needs",
+                    df=pd.DataFrame(
+                        [
+                            {
+                                "priority": "High",
+                                "area": "Rotation",
+                                "need": "Add starter depth",
+                                "internal_options": "Charlie, Delta",
+                            }
+                        ]
+                    ),
+                    group="mlb_team",
+                ),
+                DashboardSection(title="Recommended lineup vs RHP", df=outputs.recommended_lineup_vs_rhp, group="mlb_hitters"),
+                DashboardSection(title="Recommended lineup vs LHP", df=outputs.recommended_lineup_vs_lhp, group="mlb_hitters"),
+                DashboardSection(title="Recommended rotation", df=outputs.recommended_rotation, group="mlb_pitchers"),
+                DashboardSection(title="Bullpen roles", df=outputs.recommended_bullpen_roles, group="mlb_pitchers"),
                 DashboardSection(title="Recommended transactions", df=outputs.recommended_transactions, group=None),
             ]
 
@@ -108,10 +126,57 @@ class DashboardWriterTests(unittest.TestCase):
             ip_mock = Mock(side_effect=lambda df: df.copy())
             writer = self._build_writer(out_dir, round_mock, ip_mock)
 
-            writer.write_outputs(outputs, frames={"mlb_hitters": pd.DataFrame([{"player_name": "Alice"}])})
+            frames = {
+                "mlb_hitters": pd.DataFrame([{"player_name": "Alice"}]),
+                "mlb_pitchers": pd.DataFrame(
+                    [
+                        {
+                            "player_name": "Bob",
+                            "is_pitcher": True,
+                            "injured_flag": False,
+                            "ip_val": 50.0,
+                            "gs_val": 10,
+                            "stamina_now": 60,
+                            "era_val": 3.2,
+                            "fip_val": 3.4,
+                            "rotation_score": 12.5,
+                            "true_starter_flag": True,
+                            "swingman_flag": False,
+                        },
+                        {
+                            "player_name": "Charlie",
+                            "is_pitcher": True,
+                            "injured_flag": False,
+                            "ip_val": 28.0,
+                            "gs_val": 4,
+                            "stamina_now": 58,
+                            "era_val": 3.8,
+                            "fip_val": 3.9,
+                            "rotation_score": 10.4,
+                            "true_starter_flag": True,
+                            "swingman_flag": False,
+                        },
+                        {
+                            "player_name": "Delta",
+                            "is_pitcher": True,
+                            "injured_flag": False,
+                            "ip_val": 24.0,
+                            "gs_val": 2,
+                            "stamina_now": 55,
+                            "era_val": 4.1,
+                            "fip_val": 4.0,
+                            "rotation_score": 9.8,
+                            "true_starter_flag": False,
+                            "swingman_flag": True,
+                        },
+                    ]
+                ),
+            }
 
-            self.assertEqual(round_mock.call_count, 10)
-            self.assertEqual(ip_mock.call_count, 10)
+            writer.write_outputs(outputs, frames=frames)
+
+            self.assertEqual(round_mock.call_count, 11)
+            self.assertEqual(ip_mock.call_count, 11)
             self.assertTrue((out_dir / "detroit_hitters_dashboard.csv").exists())
             self.assertTrue((out_dir / "ootp_gm_dashboard.md").exists())
             markdown = (out_dir / "ootp_gm_dashboard.md").read_text(encoding="utf-8")
@@ -128,11 +193,62 @@ class DashboardWriterTests(unittest.TestCase):
                 Mock(side_effect=lambda df: df.copy()),
             )
 
-            writer.write_outputs(outputs, frames={"mlb_hitters": pd.DataFrame([{"player_name": "Alice"}])})
+            frames = {
+                "mlb_hitters": pd.DataFrame([{"player_name": "Alice"}]),
+                "mlb_pitchers": pd.DataFrame(
+                    [
+                        {
+                            "player_name": "Bob",
+                            "is_pitcher": True,
+                            "injured_flag": False,
+                            "ip_val": 50.0,
+                            "gs_val": 10,
+                            "stamina_now": 60,
+                            "era_val": 3.2,
+                            "fip_val": 3.4,
+                            "rotation_score": 12.5,
+                            "true_starter_flag": True,
+                            "swingman_flag": False,
+                        },
+                        {
+                            "player_name": "Charlie",
+                            "is_pitcher": True,
+                            "injured_flag": False,
+                            "ip_val": 28.0,
+                            "gs_val": 4,
+                            "stamina_now": 58,
+                            "era_val": 3.8,
+                            "fip_val": 3.9,
+                            "rotation_score": 10.4,
+                            "true_starter_flag": True,
+                            "swingman_flag": False,
+                        },
+                        {
+                            "player_name": "Delta",
+                            "is_pitcher": True,
+                            "injured_flag": False,
+                            "ip_val": 24.0,
+                            "gs_val": 2,
+                            "stamina_now": 55,
+                            "era_val": 4.1,
+                            "fip_val": 4.0,
+                            "rotation_score": 9.8,
+                            "true_starter_flag": False,
+                            "swingman_flag": True,
+                        },
+                    ]
+                ),
+            }
+
+            writer.write_outputs(outputs, frames=frames)
 
             dashboard_html = (out_dir / "dashboard.html").read_text(encoding="utf-8")
             team_html = (out_dir / "detroit_team.html").read_text(encoding="utf-8")
             depth_chart_html = (out_dir / "detroit_active_depth_chart.html").read_text(encoding="utf-8")
+            needs_html = (out_dir / "team_needs.html").read_text(encoding="utf-8")
+            lineup_html = (out_dir / "recommended_lineup_vs_rhp.html").read_text(encoding="utf-8")
+            rotation_html = (out_dir / "recommended_rotation.html").read_text(encoding="utf-8")
+            bullpen_html = (out_dir / "bullpen_roles.html").read_text(encoding="utf-8")
             scoring_html = (out_dir / "scoring_info.html").read_text(encoding="utf-8")
 
             self.assertIn("Detroit hitters", dashboard_html)
@@ -140,6 +256,13 @@ class DashboardWriterTests(unittest.TestCase):
             self.assertNotIn("mode=current", dashboard_html)
             self.assertIn("Detroit Team", team_html)
             self.assertIn("data-highlight='True'", depth_chart_html)
+            self.assertIn("highlights the club", needs_html)
+            self.assertIn("locks in the best healthy regulars", lineup_html)
+            self.assertIn("gives extra credit to starters", rotation_html)
+            self.assertIn("Spot Starter / Replacement Candidates", rotation_html)
+            self.assertIn("Charlie", rotation_html)
+            self.assertIn("Delta", rotation_html)
+            self.assertIn("add relief-specific credit for saves, holds", bullpen_html)
             self.assertIn("Score Breakdown Guide", scoring_html)
             self.assertIn("Formula Weight Shares", scoring_html)
             self.assertIn("Empirical Normalized Shares", scoring_html)

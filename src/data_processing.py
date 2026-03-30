@@ -17,6 +17,9 @@ class CsvRepository:
         # CSV exports in this project do not carry an in-file OOTP world date.
         return None
 
+    def get_team_header_summaries(self) -> dict[str, dict[str, object] | None]:
+        return {"mlb": None, "aaa": None}
+
 
 class MySqlRepository:
     """Load dashboard input frames from a MySQL database.
@@ -237,6 +240,54 @@ class MySqlRepository:
         if hasattr(value, "strftime"):
             return value.strftime("%Y-%m-%d")
         return str(value)
+
+    def get_team_header_summaries(self) -> dict[str, dict[str, object] | None]:
+        return {
+            "mlb": self._get_team_header_summary(self.mlb_team_name),
+            "aaa": self._get_team_header_summary(self.aaa_team_name),
+        }
+
+    def _get_team_header_summary(self, team_name: str) -> dict[str, object] | None:
+        from sqlalchemy import text
+
+        sql = """
+            SELECT
+                TRIM(CONCAT(COALESCE(t.name, ''), ' ', COALESCE(t.nickname, ''))) AS full_name,
+                tr.w AS wins,
+                tr.l AS losses,
+                tr.pos AS division_position,
+                tr.gb AS games_back
+            FROM teams t
+            LEFT JOIN team_record tr ON tr.team_id = t.team_id
+            WHERE TRIM(CONCAT(COALESCE(t.name, ''), ' ', COALESCE(t.nickname, ''))) = :team_name
+            ORDER BY t.team_id
+            LIMIT 1
+        """
+        try:
+            with self._engine.connect() as conn:
+                row = conn.execute(text(sql), {"team_name": team_name}).fetchone()
+        except Exception:
+            return None
+
+        if row is None:
+            return None
+
+        data = row._mapping if hasattr(row, "_mapping") else row
+        wins = data.get("wins")
+        losses = data.get("losses")
+        position = data.get("division_position")
+        games_back = data.get("games_back")
+
+        if wins is None and losses is None and position is None and games_back is None:
+            return None
+
+        return {
+            "team_name": self._clean_team_name(data.get("full_name"), team_name),
+            "wins": wins,
+            "losses": losses,
+            "position": position,
+            "gb": games_back,
+        }
 
     def _build_roster(self, team_name: str) -> pd.DataFrame:
             sql = """

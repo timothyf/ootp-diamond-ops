@@ -15,6 +15,64 @@ def _format_cell_value(value: object, allow_html: bool) -> str:
     return text if allow_html else escape(text)
 
 
+def _ordinal(value: object) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    if 10 <= number % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    return f"{number}{suffix}"
+
+
+def _format_games_back(value: object) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number == 0:
+        return "0"
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.1f}"
+
+
+def _render_team_header_summary(summary: dict[str, object] | None, fallback_name: str) -> str:
+    team_name = fallback_name
+    record_text = "Record unavailable"
+    position_text = "Position unavailable"
+    gb_text = "GB unavailable"
+
+    if summary:
+        team_name = str(summary.get("team_name") or fallback_name)
+        wins = summary.get("wins")
+        losses = summary.get("losses")
+        position = _ordinal(summary.get("position"))
+        games_back = _format_games_back(summary.get("gb"))
+
+        if wins is not None and losses is not None and not pd.isna(wins) and not pd.isna(losses):
+            record_text = f"{int(float(wins))}-{int(float(losses))}"
+        if position:
+            position_text = position
+        if games_back is not None:
+            gb_text = f"GB {games_back}"
+
+    return (
+        '<div class="hero-team-summary">'
+        f'<span class="hero-team-name">{escape(team_name)}</span>'
+        f'<span>{escape(record_text)}</span>'
+        f'<span>{escape(position_text)}</span>'
+        f'<span>{escape(gb_text)}</span>'
+        "</div>"
+    )
+
+
 def html_table(
     df: pd.DataFrame,
     allow_html: bool = False,
@@ -75,10 +133,12 @@ def build_html_shell(
     mlb_team_name: str,
     aaa_team_name: str,
     ootp_export_date: str | None,
+    team_header_summaries: dict[str, dict[str, object] | None] | None = None,
     active_page: str | None = None,
 ) -> str:
     mlb_home_slug = slugify(f"{mlb_team_name} team")
     aaa_home_slug = slugify(f"{aaa_team_name} team")
+    team_header_summaries = team_header_summaries or {"mlb": None, "aaa": None}
 
     nav_items = [
         ("dashboard", "dashboard.html", "Dashboard"),
@@ -92,6 +152,7 @@ def build_html_shell(
             f"{aaa_home_slug}.html",
             f"{aaa_team_name}",
         ),
+        ("team_needs", "team_needs.html", "Team Needs"),
         ("scoring_info", "scoring_info.html", "Scoring"),
         ("recommended_transactions", "recommended_transactions.html", "Transactions"),
     ]
@@ -100,6 +161,12 @@ def build_html_shell(
         for key, href, label in nav_items
     )
     nav = f'<nav class="top-nav">{nav_links}</nav>'
+    hero_team_summaries = (
+        '<div class="hero-team-summaries">'
+        f'{_render_team_header_summary(team_header_summaries.get("mlb"), mlb_team_name)}'
+        f'{_render_team_header_summary(team_header_summaries.get("aaa"), aaa_team_name)}'
+        "</div>"
+    )
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -145,7 +212,8 @@ def build_html_shell(
       color: #f9f7f1;
       border-radius: 24px;
       padding: 28px;
-      padding-right: 190px;
+      padding-right: 320px;
+      min-height: 182px;
       position: relative;
       box-shadow: var(--shadow);
     }}
@@ -181,6 +249,40 @@ def build_html_shell(
           top: 18px;
           right: 20px;
         }}
+    .hero-team-summaries {{
+      position: absolute;
+      top: 58px;
+      right: 20px;
+      display: grid;
+      gap: 10px;
+      width: 272px;
+    }}
+    .hero-team-summary {{
+      display: flex;
+      flex-wrap: nowrap;
+      justify-content: flex-end;
+      gap: 10px 16px;
+      align-items: center;
+      padding: 10px 14px;
+      border-radius: 16px;
+      background: rgba(249, 247, 241, 0.10);
+      border: 1px solid rgba(249, 247, 241, 0.18);
+      color: rgba(249, 247, 241, 0.94);
+      text-align: right;
+      white-space: nowrap;
+      width: 100%;
+      max-width: 100%;
+      overflow: hidden;
+      font-size: 0.82rem;
+    }}
+    .hero-team-name {{
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }}
     .top-nav {{
       display: flex;
       flex-wrap: wrap;
@@ -485,13 +587,26 @@ def build_html_shell(
       .hero {{
         padding: 22px;
         padding-right: 22px;
+        min-height: 0;
         border-radius: 20px;
       }}
       .hero-date {{
         position: static;
-        margin-top: 10px;
+        margin-top: 0;
+        margin-bottom: 14px;
       }}
-      .section-card {{
+      .hero-team-summaries {{
+        position: static;
+        width: auto;
+        margin-top: 16px;
+      }}
+      .hero-team-summary {{
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        text-align: left;
+        white-space: normal;
+      }}
+    .section-card {{
         padding: 18px;
       }}
       .section-grid-overview {{
@@ -509,9 +624,10 @@ def build_html_shell(
 <body>
   <main class="page page-{escape(active_page or 'default')}">
     <section class="hero">
+      <p class="hero-date">OOTP Date: {escape(ootp_export_date or 'Unknown')}</p>
       <h1>{escape(title)}</h1>
       <h3>Baseball Operations Dashboard for OOTP</h3>
-            <p class="hero-date">OOTP Date: {escape(ootp_export_date or 'Unknown')}</p>
+      {hero_team_summaries}
     </section>
     {nav}
     {body}
