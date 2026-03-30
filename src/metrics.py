@@ -7,6 +7,8 @@ from src.data_processing import PlayerDataTransformer
 
 
 class MetricsCalculator:
+    SCORE_BASELINE_OFFSET = 10.0
+
     def __init__(self, transformer: PlayerDataTransformer | None = None) -> None:
         self.transformer = transformer or PlayerDataTransformer()
 
@@ -31,6 +33,7 @@ class MetricsCalculator:
 
     def add_hitting_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
+        df["score_baseline_offset"] = self.SCORE_BASELINE_OFFSET
 
         df["pa_val"] = self.transformer.num_alias(df, ["pa", "plate_appearances"])
         df["ab_val"] = self.transformer.num_alias(df, ["ab", "at_bats"])
@@ -76,6 +79,10 @@ class MetricsCalculator:
             + df["avoid_k_pot"] * 0.14
             + df["gap_pot"] * 0.10
         )
+        # Center ratings so 50-grade talent contributes near zero and only above/below-average
+        # ratings materially shift score.
+        df["ratings_hitter_now_component"] = (df["ratings_hitter_now"] - 50.0) / 5.0
+        df["ratings_hitter_future_component"] = (df["ratings_hitter_future"] - 50.0) / 5.0
 
         df["vsr_contact_val"] = self.transformer.num_alias(df, ["vsr_contact"])
         df["vsr_power_val"] = self.transformer.num_alias(df, ["vsr_power"])
@@ -186,25 +193,27 @@ class MetricsCalculator:
 
         df["overall_hitter_score"] = (
             df["offense_score_regressed"] * 0.52
-            + df["ratings_hitter_now"] * 0.22
+            + df["ratings_hitter_now_component"] * 0.22
             + df["scarcity_bonus"] * 0.40
             + df["discipline_component"] * 0.8
             + df["platoon_skill_component"] * 0.6
             + df["defensive_component"] * 0.5
             + df["contact_quality_component"] * 0.08
             + df["running_component"] * 0.25
+            + self.SCORE_BASELINE_OFFSET
         )
 
         df["projection_hitter_score"] = (
             df["offense_score_regressed"] * 0.26
-            + df["ratings_hitter_now"] * 0.27
-            + df["ratings_hitter_future"] * 0.34
+            + df["ratings_hitter_now_component"] * 0.27
+            + df["ratings_hitter_future_component"] * 0.34
             + df["age_bonus"] * 0.5
             + df["discipline_component"] * 0.9
             + df["platoon_skill_component"] * 0.7
             + df["defensive_component"] * 0.35
             + df["contact_quality_component"] * 0.04
             + df["running_component"] * 0.2
+            + self.SCORE_BASELINE_OFFSET
         )
 
         bats = df["bats"].fillna("").astype(str).str.upper().str.strip()
@@ -284,6 +293,7 @@ class MetricsCalculator:
 
     def add_pitching_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
+        df["score_baseline_offset"] = self.SCORE_BASELINE_OFFSET
         ip_raw = self.transformer.num_alias(df, ["ip", "innings_pitched"])
         df["ip_val"] = self.transformer.innings_notation_to_decimal(ip_raw)
         df["era_val"] = self.transformer.num_alias(df, ["era"])
@@ -322,6 +332,8 @@ class MetricsCalculator:
         df["ratings_pitcher_future"] = (
             df["stuff_pot"] * 0.45 + df["movement_pot"] * 0.25 + df["control_pot"] * 0.30
         )
+        df["ratings_pitcher_now_component"] = (df["ratings_pitcher_now"] - 50.0) / 5.0
+        df["ratings_pitcher_future_component"] = (df["ratings_pitcher_future"] - 50.0) / 5.0
 
         vsl_mix = (
             self.transformer.num_alias(df, ["pitch_vsl_stuff"])
@@ -372,19 +384,21 @@ class MetricsCalculator:
 
         df["score"] = (
             df["results_pitcher_score_regressed"] * 0.58
-            + df["ratings_pitcher_now"] * 0.30
+            + df["ratings_pitcher_now_component"] * 0.30
             + df["command_dominance_component"] * 0.20
             + df["contact_management_component"] * 0.14
             + df["durability_component"] * 0.12
+            + self.SCORE_BASELINE_OFFSET
         )
         df["projection_pitcher_score"] = (
             df["results_pitcher_score_regressed"] * 0.26
-            + df["ratings_pitcher_now"] * 0.24
-            + df["ratings_pitcher_future"] * 0.34
+            + df["ratings_pitcher_now_component"] * 0.24
+            + df["ratings_pitcher_future_component"] * 0.34
             + df["age_bonus"] * 0.5
             + df["command_dominance_component"] * 0.22
             + df["contact_management_component"] * 0.14
             + df["durability_component"] * 0.10
+            + self.SCORE_BASELINE_OFFSET
         )
 
         df["role_score_sp"] = (

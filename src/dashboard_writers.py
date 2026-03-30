@@ -76,8 +76,8 @@ class DashboardOutputWriter:
             ignore_index=True,
         )
 
-        hitter_current_formula = self._pct(0.60 + 0.80, 0.22 + 0.60 + 0.50 + 0.25, 0.40)
-        hitter_projection_formula = self._pct(0.28 + 0.90, 0.27 + 0.34 + 0.70 + 0.35 + 0.20, 0.50)
+        hitter_current_formula = self._pct(0.52 + 0.80 + 0.08, 0.22 + 0.60 + 0.50 + 0.25, 0.40 + 10.0)
+        hitter_projection_formula = self._pct(0.26 + 0.90 + 0.04, 0.27 + 0.34 + 0.70 + 0.35 + 0.20, 0.50 + 10.0)
 
         command_stats = 0.9
         command_ratings = 0.06 + 0.04 + 0.4
@@ -98,7 +98,7 @@ class DashboardOutputWriter:
             + 0.14 * (contact_ratings / (contact_stats + contact_ratings))
             + 0.12 * (durability_ratings / (durability_stats + durability_ratings))
         )
-        pitcher_current_formula = self._pct(pitcher_current_stats_weight, pitcher_current_ratings_weight, 0.0)
+        pitcher_current_formula = self._pct(pitcher_current_stats_weight, pitcher_current_ratings_weight, 10.0)
 
         pitcher_projection_stats_weight = (
             0.26
@@ -113,7 +113,7 @@ class DashboardOutputWriter:
             + 0.14 * (contact_ratings / (contact_stats + contact_ratings))
             + 0.10 * (durability_ratings / (durability_stats + durability_ratings))
         )
-        pitcher_projection_formula = self._pct(pitcher_projection_stats_weight, pitcher_projection_ratings_weight, 0.5)
+        pitcher_projection_formula = self._pct(pitcher_projection_stats_weight, pitcher_projection_ratings_weight, 10.5)
 
         h = hitters
         hitter_current_empirical = self._normalized_share(
@@ -121,7 +121,7 @@ class DashboardOutputWriter:
                 "offense": ("stats", self._series(h, "offense_score_regressed") * 0.52),
                 "discipline": ("stats", self._series(h, "discipline_component") * 0.80),
                 "contact_quality": ("stats", self._series(h, "contact_quality_component") * 0.08),
-                "ratings_now": ("ratings", self._series(h, "ratings_hitter_now") * 0.22),
+                "ratings_now": ("ratings", self._series(h, "ratings_hitter_now_component") * 0.22),
                 "platoon": ("ratings", self._series(h, "platoon_skill_component") * 0.60),
                 "defense": ("ratings", self._series(h, "defensive_component") * 0.50),
                 "running": ("ratings", self._series(h, "running_component") * 0.25),
@@ -133,8 +133,8 @@ class DashboardOutputWriter:
                 "offense": ("stats", self._series(h, "offense_score_regressed") * 0.26),
                 "discipline": ("stats", self._series(h, "discipline_component") * 0.90),
                 "contact_quality": ("stats", self._series(h, "contact_quality_component") * 0.04),
-                "ratings_now": ("ratings", self._series(h, "ratings_hitter_now") * 0.27),
-                "ratings_future": ("ratings", self._series(h, "ratings_hitter_future") * 0.34),
+                "ratings_now": ("ratings", self._series(h, "ratings_hitter_now_component") * 0.27),
+                "ratings_future": ("ratings", self._series(h, "ratings_hitter_future_component") * 0.34),
                 "platoon": ("ratings", self._series(h, "platoon_skill_component") * 0.70),
                 "defense": ("ratings", self._series(h, "defensive_component") * 0.35),
                 "running": ("ratings", self._series(h, "running_component") * 0.20),
@@ -161,7 +161,7 @@ class DashboardOutputWriter:
         pitcher_current_empirical = self._normalized_share(
             {
                 "results": ("stats", self._series(p, "results_pitcher_score_regressed") * 0.58),
-                "ratings_now": ("ratings", self._series(p, "ratings_pitcher_now") * 0.30),
+                "ratings_now": ("ratings", self._series(p, "ratings_pitcher_now_component") * 0.30),
                 "command_stat": ("stats", command_stat * 0.20),
                 "command_ratings": ("ratings", command_ratings * 0.20),
                 "contact_stat": ("stats", contact_stat * 0.14),
@@ -173,8 +173,8 @@ class DashboardOutputWriter:
         pitcher_projection_empirical = self._normalized_share(
             {
                 "results": ("stats", self._series(p, "results_pitcher_score_regressed") * 0.26),
-                "ratings_now": ("ratings", self._series(p, "ratings_pitcher_now") * 0.24),
-                "ratings_future": ("ratings", self._series(p, "ratings_pitcher_future") * 0.34),
+                "ratings_now": ("ratings", self._series(p, "ratings_pitcher_now_component") * 0.24),
+                "ratings_future": ("ratings", self._series(p, "ratings_pitcher_future_component") * 0.34),
                 "age": ("other", self._series(p, "age_bonus") * 0.5),
                 "command_stat": ("stats", command_stat * 0.22),
                 "command_ratings": ("ratings", command_ratings * 0.22),
@@ -243,6 +243,8 @@ class DashboardOutputWriter:
             This page explains how player scores blend real performance stats and OOTP ratings.
             Formula-share values are based on configured score weights. Empirical-share values are
             computed from the current dataset using normalized (z-scored) weighted contributions.
+                        The "Other" bucket includes score baseline offset and context bonuses (for example,
+                        scarcity or age).
           </p>
           <div class="narrative-card">
             <h3>Current Sample</h3>
@@ -257,7 +259,8 @@ class DashboardOutputWriter:
           <div class="narrative-card">
             <h3>Empirical Normalized Shares</h3>
             <p class="narrative-intro">
-              Based on absolute z-scored contribution magnitudes from current MLB + AAA frames.
+                            Based on absolute z-scored contribution magnitudes from current MLB + AAA frames.
+                            Constant offsets have zero empirical variance and therefore do not contribute here.
             </p>
             <div class="table-wrap">
               <table class="data-table" data-sortable="false" data-highlight-starters="false" data-default-mode="">{table_head}<tbody>{empirical_rows}</tbody></table>
