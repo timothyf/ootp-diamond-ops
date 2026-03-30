@@ -8,6 +8,7 @@ from src.data_processing import PlayerDataTransformer
 
 class MetricsCalculator:
     SCORE_BASELINE_OFFSET = 10.0
+    HITTER_SCORE_SPREAD_MULTIPLIER = 2.0
 
     def __init__(self, transformer: PlayerDataTransformer | None = None) -> None:
         self.transformer = transformer or PlayerDataTransformer()
@@ -191,7 +192,7 @@ class MetricsCalculator:
         )
         df["discipline_component"] = df["discipline_score"] * self.reliability_weight(df["pa_val"], k=120) * 4.0
 
-        df["overall_hitter_score"] = (
+        overall_hitter_subtotal = (
             df["offense_score_regressed"] * 0.52
             + df["ratings_hitter_now_component"] * 0.22
             + df["scarcity_bonus"] * 0.40
@@ -200,19 +201,26 @@ class MetricsCalculator:
             + df["defensive_component"] * 0.5
             + df["contact_quality_component"] * 0.08
             + df["running_component"] * 0.25
+        )
+        df["overall_hitter_score"] = (
+            overall_hitter_subtotal * self.HITTER_SCORE_SPREAD_MULTIPLIER
             + self.SCORE_BASELINE_OFFSET
         )
 
-        df["projection_hitter_score"] = (
-            df["offense_score_regressed"] * 0.26
+        projection_hitter_subtotal = (
+            df["offense_score_regressed"] * 0.58
             + df["ratings_hitter_now_component"] * 0.27
-            + df["ratings_hitter_future_component"] * 0.34
+            + df["ratings_hitter_future_component"] * 0.48
             + df["age_bonus"] * 0.5
             + df["discipline_component"] * 0.9
             + df["platoon_skill_component"] * 0.7
             + df["defensive_component"] * 0.35
             + df["contact_quality_component"] * 0.04
             + df["running_component"] * 0.2
+            + df["scarcity_bonus"] * 0.35
+        )
+        df["projection_hitter_score"] = (
+            projection_hitter_subtotal * self.HITTER_SCORE_SPREAD_MULTIPLIER
             + self.SCORE_BASELINE_OFFSET
         )
 
@@ -391,11 +399,11 @@ class MetricsCalculator:
             + self.SCORE_BASELINE_OFFSET
         )
         df["projection_pitcher_score"] = (
-            df["results_pitcher_score_regressed"] * 0.26
-            + df["ratings_pitcher_now_component"] * 0.24
-            + df["ratings_pitcher_future_component"] * 0.34
-            + df["age_bonus"] * 0.5
-            + df["command_dominance_component"] * 0.22
+            df["results_pitcher_score_regressed"] * 0.50
+            + df["ratings_pitcher_now_component"] * 0.22
+            + df["ratings_pitcher_future_component"] * 0.24
+            + df["age_bonus"] * 0.30
+            + df["command_dominance_component"] * 0.20
             + df["contact_management_component"] * 0.14
             + df["durability_component"] * 0.10
             + self.SCORE_BASELINE_OFFSET

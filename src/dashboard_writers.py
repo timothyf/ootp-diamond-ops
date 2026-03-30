@@ -76,8 +76,17 @@ class DashboardOutputWriter:
             ignore_index=True,
         )
 
-        hitter_current_formula = self._pct(0.52 + 0.80 + 0.08, 0.22 + 0.60 + 0.50 + 0.25, 0.40 + 10.0)
-        hitter_projection_formula = self._pct(0.26 + 0.90 + 0.04, 0.27 + 0.34 + 0.70 + 0.35 + 0.20, 0.50 + 10.0)
+        hitter_spread = 2.0
+        hitter_current_formula = self._pct(
+            (0.52 + 0.80 + 0.08) * hitter_spread,
+            (0.22 + 0.60 + 0.50 + 0.25) * hitter_spread,
+            (0.40 * hitter_spread) + 10.0,
+        )
+        hitter_projection_formula = self._pct(
+            (0.58 + 0.90 + 0.04) * hitter_spread,
+            (0.27 + 0.48 + 0.70 + 0.35 + 0.20) * hitter_spread,
+            ((0.50 + 0.35) * hitter_spread) + 10.0,
+        )
 
         command_stats = 0.9
         command_ratings = 0.06 + 0.04 + 0.4
@@ -101,19 +110,19 @@ class DashboardOutputWriter:
         pitcher_current_formula = self._pct(pitcher_current_stats_weight, pitcher_current_ratings_weight, 10.0)
 
         pitcher_projection_stats_weight = (
-            0.26
-            + 0.22 * (command_stats / (command_stats + command_ratings))
+            0.50
+            + 0.20 * (command_stats / (command_stats + command_ratings))
             + 0.14 * (contact_stats / (contact_stats + contact_ratings))
             + 0.10 * (durability_stats / (durability_stats + durability_ratings))
         )
         pitcher_projection_ratings_weight = (
-            0.24
-            + 0.34
-            + 0.22 * (command_ratings / (command_stats + command_ratings))
+            0.22
+            + 0.24
+            + 0.20 * (command_ratings / (command_stats + command_ratings))
             + 0.14 * (contact_ratings / (contact_stats + contact_ratings))
             + 0.10 * (durability_ratings / (durability_stats + durability_ratings))
         )
-        pitcher_projection_formula = self._pct(pitcher_projection_stats_weight, pitcher_projection_ratings_weight, 10.5)
+        pitcher_projection_formula = self._pct(pitcher_projection_stats_weight, pitcher_projection_ratings_weight, 10.30)
 
         h = hitters
         hitter_current_empirical = self._normalized_share(
@@ -130,15 +139,16 @@ class DashboardOutputWriter:
         )
         hitter_projection_empirical = self._normalized_share(
             {
-                "offense": ("stats", self._series(h, "offense_score_regressed") * 0.26),
+                "offense": ("stats", self._series(h, "offense_score_regressed") * 0.58),
                 "discipline": ("stats", self._series(h, "discipline_component") * 0.90),
                 "contact_quality": ("stats", self._series(h, "contact_quality_component") * 0.04),
                 "ratings_now": ("ratings", self._series(h, "ratings_hitter_now_component") * 0.27),
-                "ratings_future": ("ratings", self._series(h, "ratings_hitter_future_component") * 0.34),
+                "ratings_future": ("ratings", self._series(h, "ratings_hitter_future_component") * 0.48),
                 "platoon": ("ratings", self._series(h, "platoon_skill_component") * 0.70),
                 "defense": ("ratings", self._series(h, "defensive_component") * 0.35),
                 "running": ("ratings", self._series(h, "running_component") * 0.20),
                 "age": ("other", self._series(h, "age_bonus") * 0.50),
+                "scarcity": ("other", self._series(h, "scarcity_bonus") * 0.35),
             }
         )
 
@@ -172,12 +182,12 @@ class DashboardOutputWriter:
         )
         pitcher_projection_empirical = self._normalized_share(
             {
-                "results": ("stats", self._series(p, "results_pitcher_score_regressed") * 0.26),
-                "ratings_now": ("ratings", self._series(p, "ratings_pitcher_now_component") * 0.24),
-                "ratings_future": ("ratings", self._series(p, "ratings_pitcher_future_component") * 0.34),
-                "age": ("other", self._series(p, "age_bonus") * 0.5),
-                "command_stat": ("stats", command_stat * 0.22),
-                "command_ratings": ("ratings", command_ratings * 0.22),
+                "results": ("stats", self._series(p, "results_pitcher_score_regressed") * 0.50),
+                "ratings_now": ("ratings", self._series(p, "ratings_pitcher_now_component") * 0.22),
+                "ratings_future": ("ratings", self._series(p, "ratings_pitcher_future_component") * 0.24),
+                "age": ("other", self._series(p, "age_bonus") * 0.30),
+                "command_stat": ("stats", command_stat * 0.20),
+                "command_ratings": ("ratings", command_ratings * 0.20),
                 "contact_stat": ("stats", contact_stat * 0.14),
                 "contact_ratings": ("ratings", contact_ratings * 0.14),
                 "durability_stat": ("stats", durability_stat * 0.10),
