@@ -243,29 +243,37 @@ def build_html_shell(
       padding: 24px 0 48px;
     }}
     .hero {{
-      background: linear-gradient(135deg, rgba(13, 92, 99, 0.97), rgba(18, 56, 63, 0.95));
+      background:
+        radial-gradient(circle at 14% 28%, rgba(81, 177, 170, 0.16), transparent 24%),
+        radial-gradient(circle at 78% 14%, rgba(155, 235, 255, 0.10), transparent 20%),
+        linear-gradient(135deg, #0d6268 0%, #134f58 48%, #123b45 100%);
       color: #f9f7f1;
-      border-radius: 24px;
-      padding: 26px 28px;
+      border-radius: 32px;
+      padding: 30px 34px;
       min-height: 0;
       display: grid;
-      grid-template-columns: minmax(280px, 0.9fr) minmax(620px, 1.35fr);
+      grid-template-columns: minmax(320px, 0.98fr) minmax(600px, 1.12fr);
       gap: 28px;
       align-items: center;
-      box-shadow: var(--shadow);
+      box-shadow:
+        0 28px 54px rgba(40, 34, 20, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      position: relative;
+      overflow: hidden;
     }}
+
     .hero-brand {{
       display: flex;
       align-items: center;
-      gap: 22px;
+      justify-content: flex-start;
       min-width: 0;
     }}
     .hero-logo {{
-      width: min(320px, 32vw);
+      width: min(340px, 28vw);
       height: auto;
       flex: 0 0 auto;
       display: block;
-      filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.18));
+      filter: drop-shadow(0 18px 28px rgba(0, 0, 0, 0.24));
     }}
     .hero-copy {{
       min-width: 0;
@@ -277,47 +285,53 @@ def build_html_shell(
       letter-spacing: 0.02em;
     }}
     .hero-status-panel {{
-      justify-self: end;
+      justify-self: stretch;
       width: min(100%, 100%);
-      max-width: 920px;
-      padding: 18px;
-      border-radius: 22px;
-      border: 1px solid rgba(249, 247, 241, 0.16);
-      background: rgba(249, 247, 241, 0.09);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      max-width: 880px;
+      padding: 4px 2px 8px;
     }}
     .hero-date {{
-      margin: 0 0 14px;
-      font-size: 0.84rem;
-      font-weight: 700;
+      margin: 0 0 20px;
+      text-align: center;
+      font-size: clamp(1.1rem, 1.9vw, 1.9rem);
+      font-weight: 500;
       text-transform: uppercase;
-      letter-spacing: 0.11em;
-      color: rgba(249, 247, 241, 0.74);
+      letter-spacing: 0.08em;
+      color: rgba(248, 244, 233, 0.95);
+      text-shadow: 0 2px 14px rgba(0, 0, 0, 0.26);
     }}
     .hero-team-summaries {{
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
+      gap: 22px;
     }}
     .hero-team-summary {{
-      padding: 12px 14px;
-      border-radius: 18px;
-      background: rgba(255, 255, 255, 0.07);
-      border: 1px solid rgba(249, 247, 241, 0.14);
+      padding: 20px 22px;
+      border-radius: 28px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03)),
+        rgba(17, 72, 80, 0.56);
+      border: 2px solid rgba(158, 231, 255, 0.7);
       color: rgba(249, 247, 241, 0.94);
+      box-shadow:
+        0 0 0 1px rgba(184, 239, 255, 0.18),
+        0 0 22px rgba(126, 213, 245, 0.28),
+        inset 0 0 28px rgba(193, 241, 255, 0.05);
     }}
     .hero-team-heading {{
       display: flex;
       align-items: center;
-      gap: 10px;
-      margin-bottom: 10px;
+      gap: 12px;
+      margin-bottom: 16px;
+      min-width: 0;
     }}
     .hero-team-logo {{
-      width: 34px;
-      height: 34px;
+      width: 52px;
+      height: 52px;
       object-fit: contain;
       display: block;
       flex: 0 0 auto;
+      filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.2));
     }}
     .hero-team-logo-fallback {{
       display: inline-flex;
@@ -335,28 +349,46 @@ def build_html_shell(
       display: block;
       font-weight: 700;
       letter-spacing: 0.02em;
-      font-size: 1.08rem;
-      line-height: 1.2;
+      font-size: clamp(0.9rem, 1.1vw, 1.15rem);
+      line-height: 1.1;
+      color: #f7f4ea;
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }}
     .hero-team-stats {{
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
+      gap: 14px;
     }}
     .hero-team-stat {{
       display: grid;
-      gap: 2px;
+      gap: 4px;
+      align-items: end;
+      justify-items: center;
+      min-height: 80px;
+      padding: 10px 12px 14px;
+      border-radius: 20px;
+      background: rgba(14, 55, 63, 0.42);
+      border: 1px solid rgba(168, 226, 245, 0.22);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
     }}
     .hero-team-stat strong {{
-      font-size: 1rem;
-      line-height: 1.2;
+      font-size: clamp(1.02rem, 1.2vw, 1.25rem);
+      line-height: 1.05;
       color: #f9f7f1;
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+      white-space: nowrap;
     }}
     .hero-team-stat small {{
       font-size: 0.7rem;
+      font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      color: rgba(249, 247, 241, 0.66);
+      color: rgba(239, 236, 227, 0.78);
+      text-align: center;
+      font-weight: 700;
     }}
     .top-nav {{
       display: flex;
@@ -426,7 +458,7 @@ def build_html_shell(
     .summary-card .eyebrow {{
       display: block;
       color: var(--muted);
-      font-size: 0.82rem;
+      font-size: 0.7rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       margin-bottom: 8px;
@@ -545,7 +577,7 @@ def build_html_shell(
     }}
     .section-card-compact .table-toggle {{
       padding: 6px 10px;
-      font-size: 0.82rem;
+      font-size: 0.7rem;
     }}
     .section-card-compact table.data-table {{
       min-width: 460px;
@@ -658,17 +690,15 @@ def build_html_shell(
       }}
       .hero {{
         grid-template-columns: 1fr;
-        gap: 18px;
+        gap: 22px;
         padding: 22px;
-        border-radius: 20px;
+        border-radius: 24px;
       }}
       .hero-brand {{
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 16px;
+        justify-content: flex-start;
       }}
       .hero-logo {{
-        width: min(260px, 72vw);
+        width: min(250px, 68vw);
       }}
       .hero-copy {{
         max-width: none;
@@ -683,6 +713,23 @@ def build_html_shell(
       }}
       .hero-team-summaries {{
         grid-template-columns: 1fr;
+      }}
+      .hero-team-summary {{
+        padding: 18px;
+      }}
+      .hero-team-logo {{
+        width: 44px;
+        height: 44px;
+      }}
+      .hero-team-name {{
+        font-size: 0.92rem;
+      }}
+      .hero-team-stat {{
+        min-height: 100px;
+        padding: 8px 10px 12px;
+      }}
+      .hero-team-stat small {{
+        font-size: 0.76rem;
       }}
     .section-card {{
         padding: 18px;

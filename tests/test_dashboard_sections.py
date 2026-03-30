@@ -373,7 +373,7 @@ class DashboardSectionsTests(unittest.TestCase):
                 "is_rf": False,
                 "overall_hitter_score": 8.8,
                 "dh_fit_score": 0.4,
-                "ops_val": 0.820,
+                "ops_val": 0.7,
                 "pa_val": 160,
                 "bats": "L",
                 "throws": "R",
