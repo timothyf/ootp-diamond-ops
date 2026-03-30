@@ -284,6 +284,74 @@ class DashboardOutputWriter:
         )
 
     @staticmethod
+    def _dashboard_bucket(section: DashboardSection) -> str | None:
+        title = section.title
+        lower_title = title.lower()
+        if title in {"Team needs", "Recommended transactions", "Recommended lineup vs RHP", "Recommended rotation"}:
+            return "Decisions now"
+        if section.group == "mlb_hitters" and "lineup" not in lower_title and "platoon" not in lower_title:
+            return "MLB snapshot"
+        if section.group == "mlb_pitchers" and "rotation" not in lower_title and "bullpen" not in lower_title:
+            return "MLB snapshot"
+        if section.group and section.group.startswith("aaa_") and "lineup" not in lower_title:
+            return "AAA watchlist"
+        return None
+
+    @staticmethod
+    def _dashboard_bucket_order(label: str) -> int:
+        return {
+            "Decisions now": 0,
+            "MLB snapshot": 1,
+            "AAA watchlist": 2,
+        }.get(label, 99)
+
+    @staticmethod
+    def _format_snapshot_value(value: object) -> str:
+        if pd.isna(value):
+            return ""
+        if isinstance(value, (int, float)):
+            number = float(value)
+            return f"{number:.2f}" if not number.is_integer() else str(int(number))
+        return str(value)
+
+    def _section_snapshot_text(self, section: DashboardSection) -> str:
+        if section.df.empty:
+            return "No rows in this report yet."
+
+        first_row = section.df.iloc[0]
+        title = section.title
+        if title == "Team needs":
+            priority = str(first_row.get("priority", "")).strip()
+            area = str(first_row.get("area", "")).strip()
+            need = str(first_row.get("need", "")).strip()
+            return f"Top issue: {priority} priority in {area.lower()} - {need}."
+        if title == "Recommended transactions":
+            move_type = str(first_row.get("move_type", "Recommended move")).strip()
+            player = str(first_row.get("player_name", "")).strip()
+            return f"Lead move: {move_type}{f' involving {player}' if player else ''}."
+        if "lineup" in title.lower():
+            leadoff = str(first_row.get("player_name", "")).strip()
+            return f"Starts with {leadoff} at the top of the order." if leadoff else "Review the preferred batting order."
+        if title == "Recommended rotation":
+            ace = str(first_row.get("player_name", "")).strip()
+            return f"Current rotation starts with {ace}." if ace else "Review the current five-man plan."
+        if title == "Bullpen roles":
+            reliever = str(first_row.get("player_name", "")).strip()
+            role = str(first_row.get("role", "")).strip()
+            return f"Late innings currently run through {reliever}{f' as {role}' if role else ''}." if reliever else "Review the bullpen pecking order."
+        if "depth chart" in title.lower():
+            starter = str(first_row.get("player_name", "")).strip()
+            position = str(first_row.get("position", "")).strip()
+            return f"Current first-choice {position} is {starter}." if starter else "Review the active depth chart."
+
+        player = str(first_row.get("player_name", "")).strip()
+        for score_col in ("score", "overall_hitter_score", "projection_hitter_score", "rotation_score", "bullpen_score", "projection_pitcher_score"):
+            if score_col in section.df.columns and not pd.isna(first_row.get(score_col)):
+                score = self._format_snapshot_value(first_row.get(score_col))
+                return f"Top name right now: {player} ({score})." if player else f"Top score in this report: {score}."
+        return f"Top name right now: {player}." if player else f"Open {title.lower()} for the full report."
+
+    @staticmethod
     def _overview_group_label(section: DashboardSection) -> str:
         if section.title == "Team needs":
             return "Decisions"
@@ -453,6 +521,34 @@ class DashboardOutputWriter:
         default_mode = section.default_mode if column_modes and section.default_mode in column_modes else None
         return preview, column_modes, column_labels, default_mode
 
+    @staticmethod
+    def _team_hub_bucket(section: DashboardSection, prefix: str) -> str | None:
+        lower_title = section.title.lower()
+        if prefix == "mlb_":
+            if section.title in {"Team needs", "Recommended transactions", "Recommended lineup vs RHP", "Recommended lineup vs LHP", "Platoon diagnostics"}:
+                return "Planning & decisions"
+            if section.group == "mlb_hitters" and "lineup" not in lower_title and "platoon" not in lower_title:
+                return "Position players"
+            if section.group == "mlb_pitchers":
+                return "Pitching"
+            return None
+
+        if prefix == "aaa_":
+            if section.group == "aaa_hitters":
+                return "Position players"
+            if section.group == "aaa_pitchers":
+                return "Pitching"
+            if section.title in {"Team needs", "Recommended transactions"}:
+                return "Planning & decisions"
+        return None
+
+    def _team_hub_intro(self, team_name: str, prefix: str, grouped_sections: dict[str, list[DashboardSection]]) -> str:
+        club_type = "MLB" if prefix == "mlb_" else "AAA"
+        return (
+            f"This {club_type} hub keeps {team_name}'s reports organized by roster area so you can move from "
+            f"summary to player boards to planning pages without jumping across unrelated reports."
+        )
+
     def _write_html_outputs(self, outputs: DashboardOutputs, frames: dict[str, pd.DataFrame]) -> None:
         sections = self.output_sections(outputs)
         player_links = self.write_player_detail_pages(frames) if isinstance(frames, dict) else {}
@@ -462,49 +558,38 @@ class DashboardOutputWriter:
         mlb_home_slug = self.slugify(f"{self.mlb_team_name} team")
         aaa_home_slug = self.slugify(f"{self.aaa_team_name} team")
 
-        overview_sections_by_group: dict[str, list[str]] = {
-            "MLB overview": [],
-            "AAA watchlist": [],
-            "Decisions": [],
-        }
+        overview_sections_by_group: dict[str, list[str]] = {}
         for section in sections:
+            group_label = self._dashboard_bucket(section)
+            if group_label is None:
+                continue
             slug = self.slugify(section.title)
-            preview, preview_modes, preview_labels, preview_default_mode = self._build_overview_preview(section)
-            linked_preview = (
-                self.link_player_names(preview, player_links.get(section.group, {})) if section.group else preview
-            )
-            group_label = self._overview_group_label(section)
+            area_label = "Organization"
+            if section.group and section.group.startswith("mlb_"):
+                area_label = "MLB"
+            elif section.group and section.group.startswith("aaa_"):
+                area_label = "AAA"
+
+            snapshot = self._section_snapshot_text(section)
+            description = self._section_description(section) or snapshot
             overview_sections_by_group.setdefault(group_label, []).append(
                 f"""
-                <section class="section-card section-card-compact">
-                  <header class="section-card-header">
-                    <div>
-                      <p class="section-kicker">{escape(group_label)}</p>
-                      <h2>{escape(section.title)}</h2>
-                    </div>
-                    <a class="section-link section-link-inline" href="{slug}.html">Open</a>
-                  </header>
+                <article class="summary-card">
+                  <span class="eyebrow">{escape(group_label)}</span>
+                  <strong style="font-size:1.2rem;line-height:1.3;">{escape(section.title)}</strong>
+                  <p style="margin:10px 0 8px;color:var(--ink);font-size:0.96rem;">{escape(snapshot)}</p>
+                  <p style="margin:0 0 12px;color:var(--muted);font-size:0.92rem;line-height:1.55;">{escape(description)}</p>
                   <div class="section-meta-row">
+                    <span class="section-meta-pill">{escape(area_label)}</span>
                     <span class="section-meta-pill">{len(section.df)} rows</span>
-                    <span class="section-meta-pill">Preview</span>
                   </div>
-                  <div class="table-wrap">
-                    {self.html_table(
-                        linked_preview,
-                        allow_html=True,
-                        sortable=False,
-                        highlight_starters=section.highlight_starters,
-                        column_modes=preview_modes,
-                        column_labels=preview_labels,
-                        default_mode=preview_default_mode,
-                    )}
-                  </div>
-                </section>
+                  <a class="section-link" href="{slug}.html">Open page</a>
+                </article>
                 """
             )
 
         overview_groups = []
-        for label in ("MLB overview", "AAA watchlist", "Decisions"):
+        for label in sorted(overview_sections_by_group.keys(), key=self._dashboard_bucket_order):
             cards = overview_sections_by_group.get(label, [])
             if not cards:
                 continue
@@ -514,7 +599,7 @@ class DashboardOutputWriter:
                   <div class="dashboard-group-heading">
                     <h2>{escape(label)}</h2>
                   </div>
-                  <section class="section-grid section-grid-overview">
+                  <section class="summary-grid">
                     {''.join(cards)}
                   </section>
                 </section>
@@ -523,6 +608,14 @@ class DashboardOutputWriter:
 
         dashboard_body = f"""
         <section class="dashboard-overview">
+          <section class="section-card">
+            <h2>Front Office Briefing</h2>
+            <p>
+              This landing page is now focused on the most actionable decisions first. Start with roster needs,
+              transactions, lineup, and rotation recommendations here, then move into the MLB and AAA hubs for the
+              supporting player boards and depth context.
+            </p>
+          </section>
           {''.join(overview_groups)}
         </section>
         """
@@ -533,28 +626,88 @@ class DashboardOutputWriter:
         self._write_scoring_info_page(frames)
 
         def team_hub_body(team_name: str, prefix: str, intro: str) -> str:
-            cards: list[str] = []
+            grouped_sections: dict[str, list[DashboardSection]] = {
+                "Position players": [],
+                "Pitching": [],
+                "Planning & decisions": [],
+            }
             for section in sections:
-                if not section.group or not section.group.startswith(prefix):
+                bucket = self._team_hub_bucket(section, prefix)
+                if bucket is not None:
+                    grouped_sections.setdefault(bucket, []).append(section)
+
+            group_blocks: list[str] = []
+            for label in ("Position players", "Pitching", "Planning & decisions"):
+                bucket_sections = grouped_sections.get(label, [])
+                if not bucket_sections:
                     continue
-                slug = self.slugify(section.title)
-                cards.append(
-                    f'<article class="summary-card">'
-                    f'<span class="eyebrow">Section</span>'
-                    f'<strong style="font-size:1.2rem;line-height:1.3;">{escape(section.title)}</strong>'
-                    f'<p style="margin:8px 0 10px;color:var(--muted);font-size:0.92rem;">{len(section.df)} rows</p>'
-                    f'<a class="section-link" href="{slug}.html">Open page</a>'
-                    f'</article>'
+                cards: list[str] = []
+                for section in bucket_sections:
+                    slug = self.slugify(section.title)
+                    preview, preview_modes, preview_labels, preview_default_mode = self._build_overview_preview(section)
+                    linked_preview = (
+                        self.link_player_names(preview, player_links.get(section.group, {})) if section.group else preview
+                    )
+                    description = self._section_description(section) or self._section_snapshot_text(section)
+                    cards.append(
+                        f"""
+                        <section class="section-card section-card-compact">
+                          <header class="section-card-header">
+                            <div>
+                              <p class="section-kicker">{escape(label)}</p>
+                              <h2>{escape(section.title)}</h2>
+                            </div>
+                            <a class="section-link section-link-inline" href="{slug}.html">Open</a>
+                          </header>
+                          <p>{escape(description)}</p>
+                          <div class="section-meta-row">
+                            <span class="section-meta-pill">{len(section.df)} rows</span>
+                            <span class="section-meta-pill">Preview</span>
+                          </div>
+                          <div class="table-wrap">
+                            {self.html_table(
+                                linked_preview,
+                                allow_html=True,
+                                sortable=False,
+                                highlight_starters=section.highlight_starters,
+                                column_modes=preview_modes,
+                                column_labels=preview_labels,
+                                default_mode=preview_default_mode,
+                            )}
+                          </div>
+                        </section>
+                        """
+                    )
+                group_blocks.append(
+                    f"""
+                    <section class="dashboard-group">
+                      <div class="dashboard-group-heading">
+                        <h2>{escape(label)}</h2>
+                      </div>
+                      <section class="section-grid section-grid-overview">
+                        {''.join(cards)}
+                      </section>
+                    </section>
+                    """
                 )
-            if not cards:
-                cards.append('<p class="empty-state">No team pages available.</p>')
-            return (
-                f'<section class="section-card">'
-                f'<h2>{escape(team_name)} Team Hub</h2>'
-                f'<p>{escape(intro)}</p>'
-                f'<section class="summary-grid">{"".join(cards)}</section>'
-                f'</section>'
-            )
+
+            if not group_blocks:
+                group_blocks.append('<p class="empty-state">No team pages available.</p>')
+
+            return f"""
+                <section class="dashboard-overview">
+                  <section class="section-card">
+                    <h2>{escape(team_name)} Team Hub</h2>
+                    <p>{escape(intro)}</p>
+                    <p>{escape(self._team_hub_intro(team_name, prefix, grouped_sections))}</p>
+                    <div class="section-meta-row">
+                      <span class="section-meta-pill">{sum(len(items) for items in grouped_sections.values())} linked reports</span>
+                      <span class="section-meta-pill">{escape('MLB focus' if prefix == 'mlb_' else 'AAA focus')}</span>
+                    </div>
+                  </section>
+                  {''.join(group_blocks)}
+                </section>
+            """
 
         mlb_hub_body = team_hub_body(
             self.mlb_team_name,

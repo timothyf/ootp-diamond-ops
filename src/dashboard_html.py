@@ -139,6 +139,7 @@ def build_html_shell(
     mlb_home_slug = slugify(f"{mlb_team_name} team")
     aaa_home_slug = slugify(f"{aaa_team_name} team")
     team_header_summaries = team_header_summaries or {"mlb": None, "aaa": None}
+    logo_src = "../src/images/diamondops-logo.png"
 
     nav_items = [
         ("dashboard", "dashboard.html", "Dashboard"),
@@ -161,6 +162,7 @@ def build_html_shell(
         for key, href, label in nav_items
     )
     nav = f'<nav class="top-nav">{nav_links}</nav>'
+    show_hero_title = title != "OOTP DiamondOps"
     hero_team_summaries = (
         '<div class="hero-team-summaries">'
         f'{_render_team_header_summary(team_header_summaries.get("mlb"), mlb_team_name)}'
@@ -216,6 +218,23 @@ def build_html_shell(
       min-height: 182px;
       position: relative;
       box-shadow: var(--shadow);
+    }}
+    .hero-brand {{
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      max-width: 620px;
+      padding-right: 16px;
+    }}
+    .hero-logo {{
+      width: 250px;
+      height: auto;
+      flex: 0 0 auto;
+      display: block;
+      filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.18));
+    }}
+    .hero-copy {{
+      min-width: 0;
     }}
     .hero h1 {{
       margin: 0 0 8px;
@@ -590,6 +609,15 @@ def build_html_shell(
         min-height: 0;
         border-radius: 20px;
       }}
+      .hero-brand {{
+        align-items: flex-start;
+        gap: 14px;
+        max-width: none;
+        padding-right: 0;
+      }}
+      .hero-logo {{
+        width: 68px;
+      }}
       .hero-date {{
         position: static;
         margin-top: 0;
@@ -625,8 +653,12 @@ def build_html_shell(
   <main class="page page-{escape(active_page or 'default')}">
     <section class="hero">
       <p class="hero-date">OOTP Date: {escape(ootp_export_date or 'Unknown')}</p>
-      <h1>{escape(title)}</h1>
-      <h3>Baseball Operations Dashboard for OOTP</h3>
+      <div class="hero-brand">
+        <img class="hero-logo" src="{escape(logo_src)}" alt="DiamondOps logo">
+        <div class="hero-copy">
+          {'<h1>' + escape(title) + '</h1>' if show_hero_title else ''}
+        </div>
+      </div>
       {hero_team_summaries}
     </section>
     {nav}

@@ -58,6 +58,8 @@ class DashboardHtmlTests(unittest.TestCase):
         self.assertIn("scoring_info.html", html)
         self.assertIn('class="is-active" href="toledo_mud_hens_team.html"', html)
         self.assertIn("OOTP Date: Unknown", html)
+        self.assertIn("../src/images/diamondops-logo.png", html)
+        self.assertIn('alt="DiamondOps logo"', html)
         self.assertIn("Detroit Tigers", html)
         self.assertIn("8-4", html)
         self.assertIn("1st", html)
