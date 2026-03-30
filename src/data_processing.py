@@ -332,7 +332,13 @@ class MySqlRepository:
                     ) AS weak_contact_rate
                 FROM players_game_batting pgb
                 JOIN latest l ON pgb.year = l.year_val
-                LEFT JOIN players_at_bat_batting_stats pabs ON pabs.player_id = pgb.player_id AND pabs.exit_velo > 0
+                JOIN teams t2 ON t2.team_id = pgb.team_id
+                LEFT JOIN players_at_bat_batting_stats pabs
+                    ON pabs.player_id = pgb.player_id
+                    AND pabs.game_id = pgb.game_id
+                    AND pabs.team_id = pgb.team_id
+                    AND pabs.exit_velo > 0
+                WHERE CONCAT(t2.name, ' ', t2.nickname) = :team_name
                 GROUP BY pgb.player_id
             )
             SELECT

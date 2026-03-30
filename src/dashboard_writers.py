@@ -80,12 +80,12 @@ class DashboardOutputWriter:
         hitter_current_formula = self._pct(
             (0.52 + 0.80 + 0.08) * hitter_spread,
             (0.22 + 0.60 + 0.50 + 0.25) * hitter_spread,
-            (0.40 * hitter_spread) + 10.0,
+            0.40 * hitter_spread,
         )
         hitter_projection_formula = self._pct(
             (0.58 + 0.90 + 0.04) * hitter_spread,
             (0.27 + 0.48 + 0.70 + 0.35 + 0.20) * hitter_spread,
-            ((0.50 + 0.35) * hitter_spread) + 10.0,
+            (0.50 + 0.35) * hitter_spread,
         )
 
         command_stats = 0.9
@@ -107,22 +107,22 @@ class DashboardOutputWriter:
             + 0.14 * (contact_ratings / (contact_stats + contact_ratings))
             + 0.12 * (durability_ratings / (durability_stats + durability_ratings))
         )
-        pitcher_current_formula = self._pct(pitcher_current_stats_weight, pitcher_current_ratings_weight, 10.0)
+        pitcher_current_formula = self._pct(pitcher_current_stats_weight, pitcher_current_ratings_weight, 0.0)
 
         pitcher_projection_stats_weight = (
-            0.50
+            0.35
             + 0.20 * (command_stats / (command_stats + command_ratings))
             + 0.14 * (contact_stats / (contact_stats + contact_ratings))
-            + 0.10 * (durability_stats / (durability_stats + durability_ratings))
+            + 0.08 * (durability_stats / (durability_stats + durability_ratings))
         )
         pitcher_projection_ratings_weight = (
-            0.22
-            + 0.24
+            0.18
+            + 0.40
             + 0.20 * (command_ratings / (command_stats + command_ratings))
-            + 0.14 * (contact_ratings / (contact_stats + contact_ratings))
-            + 0.10 * (durability_ratings / (durability_stats + durability_ratings))
+            + 0.12 * (contact_ratings / (contact_stats + contact_ratings))
+            + 0.08 * (durability_ratings / (durability_stats + durability_ratings))
         )
-        pitcher_projection_formula = self._pct(pitcher_projection_stats_weight, pitcher_projection_ratings_weight, 10.30)
+        pitcher_projection_formula = self._pct(pitcher_projection_stats_weight, pitcher_projection_ratings_weight, 0.45)
 
         h = hitters
         hitter_current_empirical = self._normalized_share(
@@ -182,16 +182,16 @@ class DashboardOutputWriter:
         )
         pitcher_projection_empirical = self._normalized_share(
             {
-                "results": ("stats", self._series(p, "results_pitcher_score_regressed") * 0.50),
-                "ratings_now": ("ratings", self._series(p, "ratings_pitcher_now_component") * 0.22),
-                "ratings_future": ("ratings", self._series(p, "ratings_pitcher_future_component") * 0.24),
-                "age": ("other", self._series(p, "age_bonus") * 0.30),
-                "command_stat": ("stats", command_stat * 0.20),
-                "command_ratings": ("ratings", command_ratings * 0.20),
-                "contact_stat": ("stats", contact_stat * 0.14),
-                "contact_ratings": ("ratings", contact_ratings * 0.14),
-                "durability_stat": ("stats", durability_stat * 0.10),
-                "durability_ratings": ("ratings", durability_ratings * 0.10),
+                "results": ("stats", self._series(p, "results_pitcher_score_regressed") * 0.35),
+                "ratings_now": ("ratings", self._series(p, "ratings_pitcher_now_component") * 0.18),
+                "ratings_future": ("ratings", self._series(p, "ratings_pitcher_future_component") * 0.40),
+                "age": ("other", self._series(p, "age_bonus") * 0.45),
+                "command_stat": ("stats", command_stat * 0.18),
+                "command_ratings": ("ratings", command_ratings * 0.18),
+                "contact_stat": ("stats", contact_stat * 0.12),
+                "contact_ratings": ("ratings", contact_ratings * 0.12),
+                "durability_stat": ("stats", durability_stat * 0.08),
+                "durability_ratings": ("ratings", durability_ratings * 0.08),
             }
         )
 

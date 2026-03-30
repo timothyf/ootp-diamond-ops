@@ -47,6 +47,7 @@ class MetricsCalculator:
         df["sb_val"] = self.transformer.num_alias(df, ["sb", "stolen_bases"])
         df["cs_val"] = self.transformer.num_alias(df, ["cs", "caught_stealing"])
         df["avg_val"] = self.transformer.num_alias(df, ["avg", "ba"])
+        df["iso_val"] = (df["slg_val"] - df["avg_val"]).clip(lower=0)
 
         if (df["ops_val"] == 0).all():
             df["ops_val"] = df["obp_val"] + df["slg_val"]
@@ -57,11 +58,10 @@ class MetricsCalculator:
         df["discipline_score"] = df["bbpct_val"] * 1.2 - df["kpct_val"] * 1.0
 
         df["offense_score"] = (
-            df["obp_val"] * 3.3
-            + df["slg_val"] * 2.5
-            + df["ops_val"] * 1.8
-            + df["war_val"] * 0.8
-            + df["bbpct_val"] * 0.8
+            df["obp_val"] * 4.2
+            + df["iso_val"] * 4.0
+            + df["war_val"] * 0.7
+            + df["bbpct_val"] * 0.9
             - df["kpct_val"] * 0.9
         )
 
@@ -145,6 +145,7 @@ class MetricsCalculator:
         # Quality of contact metrics derived from batted-ball data (exit velo, launch angle)
         # These are NA-safe defaults; only present when DB batting loader populated them.
         df["avg_exit_velo"] = self.transformer.num_alias(df, ["avg_exit_velo"])
+        df["tracked_bip"] = self.transformer.num_alias(df, ["tracked_bip"])
         df["hard_hit_rate"] = self.transformer.num_alias(df, ["hard_hit_rate"])
         df["barrel_rate"] = self.transformer.num_alias(df, ["barrel_rate"])
         df["sweet_spot_rate"] = self.transformer.num_alias(df, ["sweet_spot_rate"])
@@ -165,8 +166,13 @@ class MetricsCalculator:
             + df["sweet_spot_rate"] * 2.5
             - df["weak_contact_rate"] * 2.0
         )
-        # Reliability-weight by tracked balls in play; use PA as proxy if ball data unavailable.
-        contact_quality_weight = self.reliability_weight(df["avg_exit_velo"], k=80)
+        # Reliability-weight by tracked balls in play; fall back to a PA-derived estimate when
+        # detailed batted-ball tracking is unavailable.
+        contact_quality_sample = pd.Series(
+            np.where(df["tracked_bip"] > 0, df["tracked_bip"], df["pa_val"] * 0.35),
+            index=df.index,
+        )
+        contact_quality_weight = self.reliability_weight(contact_quality_sample, k=80)
         df["contact_quality_component"] = contact_quality_raw * contact_quality_weight
 
         df["speed_score"] = df["sb_val"] * 0.35 - df["cs_val"] * 0.20 + df["sb_rate_val"] * 5.0
@@ -323,16 +329,12 @@ class MetricsCalculator:
         df["k_bb_9_val"] = df["k_9_val"] - df["bb_9_val"]
         df["gb_share_val"] = np.where((df["gb_val"] + df["fb_val"]) > 0, df["gb_val"] / (df["gb_val"] + df["fb_val"]), 0)
 
-        starter_profile = ((df["gs_val"] >= 3) | (df["stamina_now"] >= 55)).astype(float)
-        starter_sample_scale = np.clip(df["ip_val"] / 60.0, 0.0, 1.0)
-        starter_penalty_scale = 1.0 - starter_profile * (1.0 - starter_sample_scale) * 0.35
-
         df["results_pitcher_score"] = (
             -df["era_val"] * 1.8
-            + -df["fip_val"] * 1.7 * starter_penalty_scale
+            + -df["fip_val"] * 1.7
             + -df["whip_val"] * 0.9
             + df["k_9_val"] * 0.85
-            + -df["bb_9_val"] * 0.42 * starter_penalty_scale
+            + -df["bb_9_val"] * 0.42
             + -df["hr_9_val"] * 0.35
         )
 
@@ -399,13 +401,13 @@ class MetricsCalculator:
             + self.SCORE_BASELINE_OFFSET
         )
         df["projection_pitcher_score"] = (
-            df["results_pitcher_score_regressed"] * 0.50
-            + df["ratings_pitcher_now_component"] * 0.22
-            + df["ratings_pitcher_future_component"] * 0.24
-            + df["age_bonus"] * 0.30
-            + df["command_dominance_component"] * 0.20
-            + df["contact_management_component"] * 0.14
-            + df["durability_component"] * 0.10
+            df["results_pitcher_score_regressed"] * 0.35
+            + df["ratings_pitcher_now_component"] * 0.18
+            + df["ratings_pitcher_future_component"] * 0.40
+            + df["age_bonus"] * 0.45
+            + df["command_dominance_component"] * 0.18
+            + df["contact_management_component"] * 0.12
+            + df["durability_component"] * 0.08
             + self.SCORE_BASELINE_OFFSET
         )
 
