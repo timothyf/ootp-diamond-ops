@@ -43,6 +43,28 @@ def _format_games_back(value: object) -> str | None:
     return f"{number:.1f}"
 
 
+def _team_logo_text(team_name: str) -> str:
+    words = [part for part in str(team_name).replace("-", " ").split() if part]
+    lowered = [word.lower() for word in words]
+    if "tigers" in lowered:
+        return "DET"
+    if "mud" in lowered or "hens" in lowered:
+        return "TOL"
+    if words:
+        primary = words[0][:3].upper()
+        return primary if primary else "TM"
+    return "TM"
+
+
+def _team_logo_src(team_name: str) -> str | None:
+    lowered = str(team_name).strip().lower()
+    if "tiger" in lowered or "detroit" in lowered:
+        return "../src/images/detroit-logo.png"
+    if "toledo" in lowered or "mud hens" in lowered or "mud" in lowered or "hens" in lowered:
+        return "../src/images/toledo-logo.png"
+    return None
+
+
 def _render_team_header_summary(summary: dict[str, object] | None, fallback_name: str) -> str:
     team_name = fallback_name
     record_text = "Record unavailable"
@@ -61,14 +83,26 @@ def _render_team_header_summary(summary: dict[str, object] | None, fallback_name
         if position:
             position_text = position
         if games_back is not None:
-            gb_text = f"GB {games_back}"
+            gb_text = games_back
+
+    logo_src = _team_logo_src(team_name)
+    logo_html = (
+        f'<img class="hero-team-logo" src="{escape(logo_src)}" alt="{escape(team_name)} logo">'
+        if logo_src
+        else f'<span class="hero-team-logo hero-team-logo-fallback" aria-hidden="true">{escape(_team_logo_text(team_name))}</span>'
+    )
 
     return (
         '<div class="hero-team-summary">'
+        '<div class="hero-team-heading">'
+        f"{logo_html}"
         f'<span class="hero-team-name">{escape(team_name)}</span>'
-        f'<span>{escape(record_text)}</span>'
-        f'<span>{escape(position_text)}</span>'
-        f'<span>{escape(gb_text)}</span>'
+        "</div>"
+        '<div class="hero-team-stats">'
+        f'<span class="hero-team-stat"><strong>{escape(record_text)}</strong><small>Record</small></span>'
+        f'<span class="hero-team-stat"><strong>{escape(position_text)}</strong><small>Position</small></span>'
+        f'<span class="hero-team-stat"><strong>{escape(gb_text)}</strong><small>GB</small></span>'
+        "</div>"
         "</div>"
     )
 
@@ -162,12 +196,14 @@ def build_html_shell(
         for key, href, label in nav_items
     )
     nav = f'<nav class="top-nav">{nav_links}</nav>'
-    show_hero_title = title != "OOTP DiamondOps"
     hero_team_summaries = (
+        '<aside class="hero-status-panel">'
+        f'<p class="hero-date">OOTP Date: {escape(ootp_export_date or "Unknown")}</p>'
         '<div class="hero-team-summaries">'
         f'{_render_team_header_summary(team_header_summaries.get("mlb"), mlb_team_name)}'
         f'{_render_team_header_summary(team_header_summaries.get("aaa"), aaa_team_name)}'
         "</div>"
+        "</aside>"
     )
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -202,32 +238,30 @@ def build_html_shell(
       min-height: 100vh;
     }}
     .page {{
-      width: min(1200px, calc(100% - 32px));
+      width: min(1280px, calc(100% - 32px));
       margin: 0 auto;
       padding: 24px 0 48px;
-    }}
-    .page-dashboard {{
-      width: min(1320px, calc(100% - 32px));
     }}
     .hero {{
       background: linear-gradient(135deg, rgba(13, 92, 99, 0.97), rgba(18, 56, 63, 0.95));
       color: #f9f7f1;
       border-radius: 24px;
-      padding: 28px;
-      padding-right: 320px;
-      min-height: 182px;
-      position: relative;
+      padding: 26px 28px;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(620px, 1.35fr);
+      gap: 28px;
+      align-items: center;
       box-shadow: var(--shadow);
     }}
     .hero-brand {{
       display: flex;
       align-items: center;
-      gap: 18px;
-      max-width: 620px;
-      padding-right: 16px;
+      gap: 22px;
+      min-width: 0;
     }}
     .hero-logo {{
-      width: 250px;
+      width: min(320px, 32vw);
       height: auto;
       flex: 0 0 auto;
       display: block;
@@ -235,72 +269,94 @@ def build_html_shell(
     }}
     .hero-copy {{
       min-width: 0;
+      max-width: 340px;
     }}
     .hero h1 {{
-      margin: 0 0 8px;
-      font-size: clamp(2rem, 4vw, 3.3rem);
+      margin: 0;
+      font-size: clamp(2rem, 3.2vw, 3rem);
       letter-spacing: 0.02em;
     }}
-    .hero h3 {{
-      margin: 0;
-      font-size: 1.02rem;
-      font-weight: 600;
-      color: rgba(249, 247, 241, 0.78);
+    .hero-status-panel {{
+      justify-self: end;
+      width: min(100%, 100%);
+      max-width: 920px;
+      padding: 18px;
+      border-radius: 22px;
+      border: 1px solid rgba(249, 247, 241, 0.16);
+      background: rgba(249, 247, 241, 0.09);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
     }}
-    .hero p {{
-      margin: 0;
-      max-width: 60ch;
-      color: rgba(249, 247, 241, 0.84);
-      line-height: 1.55;
+    .hero-date {{
+      margin: 0 0 14px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.11em;
+      color: rgba(249, 247, 241, 0.74);
     }}
-        .hero-date {{
-          margin-top: 0;
-          display: inline-flex;
-          align-items: center;
-            padding: 6px 12px;
-            border-radius: 999px;
-            border: 1px solid rgba(249, 247, 241, 0.24);
-            background: rgba(249, 247, 241, 0.10);
-            color: rgba(249, 247, 241, 0.96);
-            font-size: 0.9rem;
-            letter-spacing: 0.03em;
-          position: absolute;
-          top: 18px;
-          right: 20px;
-        }}
     .hero-team-summaries {{
-      position: absolute;
-      top: 58px;
-      right: 20px;
       display: grid;
-      gap: 10px;
-      width: 272px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
     }}
     .hero-team-summary {{
-      display: flex;
-      flex-wrap: nowrap;
-      justify-content: flex-end;
-      gap: 10px 16px;
-      align-items: center;
-      padding: 10px 14px;
-      border-radius: 16px;
-      background: rgba(249, 247, 241, 0.10);
-      border: 1px solid rgba(249, 247, 241, 0.18);
+      padding: 12px 14px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(249, 247, 241, 0.14);
       color: rgba(249, 247, 241, 0.94);
-      text-align: right;
-      white-space: nowrap;
-      width: 100%;
-      max-width: 100%;
-      overflow: hidden;
-      font-size: 0.82rem;
+    }}
+    .hero-team-heading {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }}
+    .hero-team-logo {{
+      width: 34px;
+      height: 34px;
+      object-fit: contain;
+      display: block;
+      flex: 0 0 auto;
+    }}
+    .hero-team-logo-fallback {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: linear-gradient(135deg, rgba(240, 180, 41, 0.9), rgba(198, 120, 27, 0.92));
+      color: #13272b;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
     }}
     .hero-team-name {{
+      display: block;
       font-weight: 700;
       letter-spacing: 0.02em;
-      flex: 1 1 auto;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: 1.08rem;
+      line-height: 1.2;
+    }}
+    .hero-team-stats {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }}
+    .hero-team-stat {{
+      display: grid;
+      gap: 2px;
+    }}
+    .hero-team-stat strong {{
+      font-size: 1rem;
+      line-height: 1.2;
+      color: #f9f7f1;
+    }}
+    .hero-team-stat small {{
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: rgba(249, 247, 241, 0.66);
     }}
     .top-nav {{
       display: flex;
@@ -598,41 +654,35 @@ def build_html_shell(
     }}
     @media (max-width: 720px) {{
       .page {{
-        width: min(100% - 20px, 1200px);
-      }}
-      .page-dashboard {{
-        width: min(100% - 20px, 1320px);
+        width: min(100% - 20px, 1280px);
       }}
       .hero {{
+        grid-template-columns: 1fr;
+        gap: 18px;
         padding: 22px;
-        padding-right: 22px;
-        min-height: 0;
         border-radius: 20px;
       }}
       .hero-brand {{
+        flex-direction: column;
         align-items: flex-start;
-        gap: 14px;
-        max-width: none;
-        padding-right: 0;
+        gap: 16px;
       }}
       .hero-logo {{
-        width: 68px;
+        width: min(260px, 72vw);
       }}
-      .hero-date {{
-        position: static;
-        margin-top: 0;
-        margin-bottom: 14px;
+      .hero-copy {{
+        max-width: none;
+      }}
+      .hero-status-panel {{
+        justify-self: stretch;
+        width: 100%;
+        max-width: none;
+      }}
+      .hero-team-stats {{
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }}
       .hero-team-summaries {{
-        position: static;
-        width: auto;
-        margin-top: 16px;
-      }}
-      .hero-team-summary {{
-        flex-wrap: wrap;
-        justify-content: flex-start;
-        text-align: left;
-        white-space: normal;
+        grid-template-columns: 1fr;
       }}
     .section-card {{
         padding: 18px;
@@ -652,12 +702,8 @@ def build_html_shell(
 <body>
   <main class="page page-{escape(active_page or 'default')}">
     <section class="hero">
-      <p class="hero-date">OOTP Date: {escape(ootp_export_date or 'Unknown')}</p>
       <div class="hero-brand">
         <img class="hero-logo" src="{escape(logo_src)}" alt="DiamondOps logo">
-        <div class="hero-copy">
-          {'<h1>' + escape(title) + '</h1>' if show_hero_title else ''}
-        </div>
       </div>
       {hero_team_summaries}
     </section>

@@ -736,12 +736,14 @@ class DashboardOutputWriter:
                 if section.group
                 else section.df
             )
-            if section.group and section.group.startswith("mlb_"):
+            if section.title == "Team needs":
+                active_nav = "team_needs"
+            elif section.title == "Recommended transactions":
+                active_nav = "recommended_transactions"
+            elif section.group and section.group.startswith("mlb_"):
                 active_nav = mlb_home_slug
             elif section.group and section.group.startswith("aaa_"):
                 active_nav = aaa_home_slug
-            elif section.title == "Recommended transactions":
-                active_nav = "recommended_transactions"
             else:
                 active_nav = "dashboard"
             description = self._section_description(section)

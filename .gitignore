@@ -68,3 +68,5 @@ src/data/*
 __init__.py
 
 sql/
+
+src/*.png

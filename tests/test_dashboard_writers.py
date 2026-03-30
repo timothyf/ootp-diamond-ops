@@ -261,6 +261,7 @@ class DashboardWriterTests(unittest.TestCase):
             self.assertIn("Pitching", team_html)
             self.assertIn("Planning &amp; decisions", team_html)
             self.assertIn("data-highlight='True'", depth_chart_html)
+            self.assertIn("data-page='team_needs'", needs_html)
             self.assertIn("highlights the club", needs_html)
             self.assertIn("locks in the best healthy regulars", lineup_html)
             self.assertIn("gives extra credit to starters", rotation_html)
