@@ -134,6 +134,33 @@ class MetricsCalculator:
             ),
         )
 
+        # Quality of contact metrics derived from batted-ball data (exit velo, launch angle)
+        # These are NA-safe defaults; only present when DB batting loader populated them.
+        df["avg_exit_velo"] = self.transformer.num_alias(df, ["avg_exit_velo"])
+        df["hard_hit_rate"] = self.transformer.num_alias(df, ["hard_hit_rate"])
+        df["barrel_rate"] = self.transformer.num_alias(df, ["barrel_rate"])
+        df["sweet_spot_rate"] = self.transformer.num_alias(df, ["sweet_spot_rate"])
+        df["weak_contact_rate"] = self.transformer.num_alias(df, ["weak_contact_rate"])
+
+        # Normalize exit velocity: scale from [70, 110] mph to [-1, 1] range; 90 mph = 0.
+        ev_normalized = np.where(
+            df["avg_exit_velo"] > 0,
+            (df["avg_exit_velo"] - 90.0) / 20.0,
+            0.0
+        )
+        # Combine contact signals: hard hit + barrel + sweet spot are positive; weak contact is negative.
+        # Weight barrel_rate higher than individual components since it represents optimal EV+LA combination.
+        contact_quality_raw = (
+            ev_normalized * 0.25
+            + df["hard_hit_rate"] * 3.0
+            + df["barrel_rate"] * 4.0
+            + df["sweet_spot_rate"] * 2.5
+            - df["weak_contact_rate"] * 2.0
+        )
+        # Reliability-weight by tracked balls in play; use PA as proxy if ball data unavailable.
+        contact_quality_weight = self.reliability_weight(df["avg_exit_velo"], k=80)
+        df["contact_quality_component"] = contact_quality_raw * contact_quality_weight
+
         df["speed_score"] = df["sb_val"] * 0.35 - df["cs_val"] * 0.20 + df["sb_rate_val"] * 5.0
 
         df["scarcity_bonus"] = 0.0
@@ -158,23 +185,25 @@ class MetricsCalculator:
         df["discipline_component"] = df["discipline_score"] * self.reliability_weight(df["pa_val"], k=120) * 4.0
 
         df["overall_hitter_score"] = (
-            df["offense_score_regressed"] * 0.60
+            df["offense_score_regressed"] * 0.52
             + df["ratings_hitter_now"] * 0.22
             + df["scarcity_bonus"] * 0.40
             + df["discipline_component"] * 0.8
             + df["platoon_skill_component"] * 0.6
             + df["defensive_component"] * 0.5
+            + df["contact_quality_component"] * 0.08
             + df["running_component"] * 0.25
         )
 
         df["projection_hitter_score"] = (
-            df["offense_score_regressed"] * 0.28
+            df["offense_score_regressed"] * 0.26
             + df["ratings_hitter_now"] * 0.27
             + df["ratings_hitter_future"] * 0.34
             + df["age_bonus"] * 0.5
             + df["discipline_component"] * 0.9
             + df["platoon_skill_component"] * 0.7
             + df["defensive_component"] * 0.35
+            + df["contact_quality_component"] * 0.04
             + df["running_component"] * 0.2
         )
 

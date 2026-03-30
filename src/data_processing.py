@@ -304,6 +304,36 @@ class MySqlRepository:
                 JOIN latest l ON pcs.year = l.year_val
                 WHERE pcs.split_id = 1
                 GROUP BY pcs.player_id
+            ),
+            ball_data AS (
+                SELECT
+                    pgb.player_id,
+                    COUNT(CASE WHEN pabs.exit_velo > 0 THEN 1 END) AS tracked_bip,
+                    ROUND(AVG(CASE WHEN pabs.exit_velo > 0 THEN pabs.exit_velo END), 1) AS avg_exit_velo,
+                    ROUND(
+                        SUM(CASE WHEN pabs.exit_velo >= 95 THEN 1 ELSE 0 END)
+                        / NULLIF(COUNT(CASE WHEN pabs.exit_velo > 0 THEN 1 END), 0),
+                        3
+                    ) AS hard_hit_rate,
+                    ROUND(
+                        SUM(CASE WHEN pabs.exit_velo >= 95 AND pabs.launch_angle >= 8 AND pabs.launch_angle <= 32 THEN 1 ELSE 0 END)
+                        / NULLIF(COUNT(CASE WHEN pabs.exit_velo > 0 THEN 1 END), 0),
+                        3
+                    ) AS barrel_rate,
+                    ROUND(
+                        SUM(CASE WHEN pabs.launch_angle >= 8 AND pabs.launch_angle <= 32 THEN 1 ELSE 0 END)
+                        / NULLIF(COUNT(CASE WHEN pabs.exit_velo > 0 THEN 1 END), 0),
+                        3
+                    ) AS sweet_spot_rate,
+                    ROUND(
+                        SUM(CASE WHEN pabs.exit_velo < 85 OR pabs.launch_angle < -30 OR pabs.launch_angle > 50 THEN 1 ELSE 0 END)
+                        / NULLIF(COUNT(CASE WHEN pabs.exit_velo > 0 THEN 1 END), 0),
+                        3
+                    ) AS weak_contact_rate
+                FROM players_game_batting pgb
+                JOIN latest l ON pgb.year = l.year_val
+                LEFT JOIN players_at_bat_batting_stats pabs ON pabs.player_id = pgb.player_id AND pabs.exit_velo > 0
+                GROUP BY pgb.player_id
             )
             SELECT
                 CASE
@@ -387,14 +417,20 @@ class MySqlRepository:
                 ) AS BABIP,
                 ROUND(COALESCE(w.war_total, 0), 1) AS WAR,
                 SUM(COALESCE(pgb.sb, 0)) AS SB,
-                SUM(COALESCE(pgb.cs, 0)) AS CS
+                SUM(COALESCE(pgb.cs, 0)) AS CS,
+                COALESCE(bd.avg_exit_velo, 0) AS avg_exit_velo,
+                COALESCE(bd.hard_hit_rate, 0) AS hard_hit_rate,
+                COALESCE(bd.barrel_rate, 0) AS barrel_rate,
+                COALESCE(bd.sweet_spot_rate, 0) AS sweet_spot_rate,
+                COALESCE(bd.weak_contact_rate, 0) AS weak_contact_rate
             FROM players_game_batting pgb
             JOIN latest l ON pgb.year = l.year_val
             JOIN players p ON p.player_id = pgb.player_id
             JOIN teams t ON t.team_id = pgb.team_id
             LEFT JOIN war w ON w.player_id = pgb.player_id
+            LEFT JOIN ball_data bd ON bd.player_id = pgb.player_id
             WHERE CONCAT(t.name, ' ', t.nickname) = :team_name
-            GROUP BY p.player_id, p.uniform_number, p.first_name, p.last_name, p.position, p.bats, p.throws, w.war_total
+            GROUP BY p.player_id, p.uniform_number, p.first_name, p.last_name, p.position, p.bats, p.throws, w.war_total, bd.avg_exit_velo, bd.hard_hit_rate, bd.barrel_rate, bd.sweet_spot_rate, bd.weak_contact_rate
             ORDER BY PA DESC, Name
             """
             return self._read_sql(sql, {"team_name": team_name})

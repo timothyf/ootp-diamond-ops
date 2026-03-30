@@ -118,8 +118,9 @@ class DashboardOutputWriter:
         h = hitters
         hitter_current_empirical = self._normalized_share(
             {
-                "offense": ("stats", self._series(h, "offense_score_regressed") * 0.60),
+                "offense": ("stats", self._series(h, "offense_score_regressed") * 0.52),
                 "discipline": ("stats", self._series(h, "discipline_component") * 0.80),
+                "contact_quality": ("stats", self._series(h, "contact_quality_component") * 0.08),
                 "ratings_now": ("ratings", self._series(h, "ratings_hitter_now") * 0.22),
                 "platoon": ("ratings", self._series(h, "platoon_skill_component") * 0.60),
                 "defense": ("ratings", self._series(h, "defensive_component") * 0.50),
@@ -129,8 +130,9 @@ class DashboardOutputWriter:
         )
         hitter_projection_empirical = self._normalized_share(
             {
-                "offense": ("stats", self._series(h, "offense_score_regressed") * 0.28),
+                "offense": ("stats", self._series(h, "offense_score_regressed") * 0.26),
                 "discipline": ("stats", self._series(h, "discipline_component") * 0.90),
+                "contact_quality": ("stats", self._series(h, "contact_quality_component") * 0.04),
                 "ratings_now": ("ratings", self._series(h, "ratings_hitter_now") * 0.27),
                 "ratings_future": ("ratings", self._series(h, "ratings_hitter_future") * 0.34),
                 "platoon": ("ratings", self._series(h, "platoon_skill_component") * 0.70),

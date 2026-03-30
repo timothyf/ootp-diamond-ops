@@ -20,7 +20,7 @@ def build_hitter_toggle_dashboard(
     ]
     if include_potential:
         current_cols.extend(["contact_pot", "power_pot", "eye_pot"])
-    current_cols.extend(["score", "injury_text"])
+    current_cols.extend(["score", "projection_score", "injury_text"])
     stats_cols = [
         "g",
         "stats_pa",
@@ -55,6 +55,7 @@ def build_hitter_toggle_dashboard(
         "power_pot": "power_pot",
         "eye_pot": "eye_pot",
         "score": "score",
+        "projection_score": "proj_score",
         "g": "g",
         "stats_pa": "pa",
         "ab": "ab",
@@ -91,6 +92,7 @@ def build_hitter_toggle_dashboard(
             stats_slg=lambda x: x["slg"],
             stats_ops=lambda x: x["ops"],
             score=lambda x: x[score_col],
+            projection_score=lambda x: x["projection_hitter_score"],
         )[display_columns]
         .head(15)
         .copy()
@@ -406,7 +408,7 @@ def build_pitcher_toggle_dashboard(
     ]
     if include_potential:
         current_cols.extend(["stuff_pot", "movement_pot", "control_pot"])
-    current_cols.extend(["score", "injury_text"])
+    current_cols.extend(["score", "projection_score", "injury_text"])
     stats_cols = [
         "g",
         "gs",
@@ -461,6 +463,7 @@ def build_pitcher_toggle_dashboard(
         "bb_9": "bb_9",
         "hr_9": "hr_9",
         "war": "war",
+        "projection_score": "proj_score",
         "injury_text": "injury_text",
     }
     display_columns = ["player_name", "primary_position", *current_cols, *stats_cols]
@@ -476,6 +479,7 @@ def build_pitcher_toggle_dashboard(
             cv_whip=lambda x: x["whip_val"],
             stats_ip=lambda x: x["ip"],
             score=lambda x: x[score_col],
+            projection_score=lambda x: x["projection_pitcher_score"],
         )[display_columns]
         .head(15)
         .copy()
