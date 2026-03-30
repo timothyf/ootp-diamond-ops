@@ -1,48 +1,94 @@
 # OOTP DiamondOps
 
-OOTP DiamondOps generates a baseball operations dashboard for an MLB club and its AAA affiliate using OOTP export data. It produces lineup and pitching recommendations, promotion candidates, and transaction guidance in both CSV and HTML formats.
+OOTP DiamondOps generates a baseball operations dashboard for an MLB club and its AAA affiliate from OOTP exports. It produces scored roster boards, planning pages, transaction guidance, and linked HTML reports for front-office review.
 
-## What It Produces
+## Current Functionality
 
-From one run, DiamondOps generates:
+From one run, DiamondOps currently produces:
 
-- MLB hitter and pitcher value boards
-- AAA hitter and pitcher promotion boards
-- Recommended lineup vs RHP and vs LHP
-- Recommended 5-man rotation
-- Recommended bullpen roles
-- Platoon diagnostics for corner-position optimization
-- Recommended transactions based on promotion pressure and replacement targets
-- Consolidated Markdown report for quick GM review
+- A landing dashboard with grouped sections for:
+  - `Decisions now`
+  - `MLB snapshot`
+  - `AAA watchlist`
+- Team hub pages for the MLB and AAA clubs
+- Merged hitter and pitcher tables with an in-page `Current` / `Stats` toggle
+- MLB active depth chart
+- Recommended lineups vs RHP and vs LHP
+- Platoon diagnostics
+- Recommended rotation
+- Spot starter / replacement starter candidates
+- Bullpen role recommendations
+- Team needs / acquisition-priority report
+- Recommended transactions
+- Scoring breakdown page
+- Player detail pages linked from report tables
+- CSV outputs for the core report tables
+- A consolidated Markdown report for quick review
 
-Outputs are written to the `output/` directory.
+HTML pages include a shared site shell with:
 
-## Key Features
+- A branded hero header
+- OOTP date
+- MLB and AAA team record, division position, and games back
+- Team logos in the header status cards
+- Shared top navigation across reports
 
-- Dual data sources:
-	- CSV mode: reads OOTP-style CSV exports from `src/data/`
-	- DB mode: reads from a MySQL schema generated from OOTP SQL exports
-- Team-aware DB queries:
-	- Supports custom MLB and AAA team names
-	- Includes startup smoke-check for required DB tables
-- Repeatable import pipeline:
-	- `scripts/import_mysql.sh` recreates and imports a target database
-	- Applies foreign keys from `sql/foreign_keys.mysql.sql` at the end
-	- Repairs missing parent primary keys before FK import for compatibility with regenerated OOTP exports
+Outputs are written to `output/`.
+
+## Report Structure
+
+The generated HTML site is organized around a few core entry points:
+
+- `dashboard.html`
+  - high-level landing page with the most actionable reports first
+- MLB team hub
+  - grouped into `Position players`, `Pitching`, and `Planning & decisions`
+- AAA team hub
+  - grouped into the same high-level areas for consistency
+- Standalone report pages
+  - full tables and descriptions for each recommendation or board
+
+## Data Sources
+
+DiamondOps supports two modes:
+
+- CSV mode
+  - reads OOTP-style CSV exports from `src/data/`
+- MySQL mode
+  - reads from a MySQL database populated from OOTP SQL exports
+
+MySQL mode also supports:
+
+- explicit MLB and AAA team-name overrides
+- automatic team detection when overrides are omitted
+- DB smoke checks before generation
+- header standings lookup for the generated HTML site
 
 ## Project Layout
 
-- `scripts/generate.py`: Main dashboard generator CLI
-- `scripts/import_mysql.sh`: MySQL import helper for OOTP SQL dumps
-- `src/`: Scoring, lineup planning, transaction logic, and report generation
-- `src/data/`: CSV input files for CSV mode
-- `sql/`: OOTP SQL export files used by the importer
-- `output/`: Generated CSV, HTML, and Markdown reports
+- `scripts/generate.py`
+  - main CLI entry point
+- `scripts/build.sh`
+  - convenience script for local DB-backed generation
+- `scripts/import_mysql.sh`
+  - MySQL import helper for OOTP SQL dumps
+- `scripts/test.sh`
+  - runs the unit test suite from the project virtual environment
+- `src/`
+  - scoring, data processing, lineup planning, transaction logic, and HTML generation
+- `src/data/`
+  - CSV input files for CSV mode
+- `src/images/`
+  - shared site and team logo assets
+- `sql/`
+  - OOTP SQL export files used by the importer
+- `output/`
+  - generated CSV, HTML, and Markdown reports
 
 ## Requirements
 
 - Python 3.10+
-- MySQL client (`mysql`) for database import workflow
+- MySQL client (`mysql`) for the import workflow
 - Python packages:
 
 ```bash
@@ -51,46 +97,54 @@ pip install pandas numpy sqlalchemy pymysql tabulate
 
 ## Usage
 
-### 1. Generate dashboard from CSV files
+### Generate from CSV files
 
-This is the simplest path and uses files under `src/data/`.
+This uses CSVs under `src/data/`.
 
 ```bash
 python scripts/generate.py --source csv
 ```
 
-### 2. Generate dashboard from MySQL
+### Generate from MySQL
 
 Pass a SQLAlchemy MySQL URL directly:
 
 ```bash
 python scripts/generate.py \
-	--source db \
-	--db-url 'mysql+pymysql://root:YOUR_PASSWORD@127.0.0.1:3306/ootp_db'
+  --source db \
+  --db-url 'mysql+pymysql://root:YOUR_PASSWORD@127.0.0.1:3306/ootp_db'
 ```
 
-Or use an environment variable:
+Or use environment variables:
 
 ```bash
 export OOTP_DB_URL='mysql+pymysql://root:YOUR_PASSWORD@127.0.0.1:3306/ootp_db'
 python scripts/generate.py
 ```
 
-### 3. Use custom team names in DB mode
+### Use custom team names in DB mode
 
-Team names must match the full team name in the database (for example: `Detroit Tigers`, `Toledo Mud Hens`).
+Team names must match the full `name + nickname` stored in the database.
 
 ```bash
 python scripts/generate.py \
-	--source db \
-	--db-url 'mysql+pymysql://root:YOUR_PASSWORD@127.0.0.1:3306/ootp_db' \
-	--mlb-team 'Detroit Tigers' \
-	--aaa-team 'Toledo Mud Hens'
+  --source db \
+  --db-url 'mysql+pymysql://root:YOUR_PASSWORD@127.0.0.1:3306/ootp_db' \
+  --mlb-team 'Detroit Tigers' \
+  --aaa-team 'Toledo Mud Hens'
+```
+
+### Use the local build helper
+
+For the common local DB workflow:
+
+```bash
+./scripts/build.sh
 ```
 
 ## Testing
 
-Run the focused unit tests with the project virtual environment:
+Run the full test suite:
 
 ```bash
 ./scripts/test.sh
@@ -99,16 +153,7 @@ Run the focused unit tests with the project virtual environment:
 Equivalent direct command:
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
-```
-
-CI-friendly example step:
-
-```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install pandas numpy sqlalchemy pymysql tabulate
-./scripts/test.sh
+./.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 ```
 
 ## MySQL Import Workflow
@@ -121,46 +166,59 @@ If you export OOTP SQL files into `sql/`, import them with:
 
 Importer behavior:
 
-- Drops and recreates the target database
-- Imports tables in dependency-aware order
-- Enforces foreign-key centralization outside of `sql/foreign_keys.mysql.sql`
-- Adds missing parent primary keys when needed before FK import
-- Applies FKs from `sql/foreign_keys.mysql.sql` at the final step
+- drops and recreates the target database
+- imports tables in dependency-aware order
+- repairs missing parent primary keys before foreign-key import when needed
+- applies foreign keys from `sql/foreign_keys.mysql.sql` at the end
 
 ## Source Selection Rules
 
-`scripts/generate.py` resolves data source as follows:
+`scripts/generate.py` resolves the data source in this order:
 
-1. Explicit `--source` flag
-2. If `--source` is omitted, DB mode is used when `OOTP_DB_URL` is set
-3. Otherwise CSV mode is used
+1. explicit `--source`
+2. if `--source` is omitted, DB mode is used when `OOTP_DB_URL` is set
+3. otherwise CSV mode is used
 
 ## Typical Outputs
 
 You should expect files similar to:
 
 - `output/dashboard.html`
+- `output/scoring_info.html`
+- `output/team_needs.html`
+- `output/recommended_lineup_vs_rhp.html`
+- `output/recommended_lineup_vs_lhp.html`
+- `output/recommended_rotation.html`
+- `output/bullpen_roles.html`
+- `output/recommended_transactions.html`
+- `output/<mlb_team>_team.html`
+- `output/<aaa_team>_team.html`
 - `output/ootp_gm_dashboard.md`
-- `output/recommended_lineup_vs_rhp.csv`
-- `output/recommended_lineup_vs_lhp.csv`
-- `output/recommended_rotation.csv`
-- `output/recommended_bullpen_roles.csv`
-- `output/recommended_transactions.csv`
-- Team-specific dashboard files for MLB and AAA hitters/pitchers in CSV and HTML
+- team-specific CSV dashboards for hitters and pitchers
 
 ## Troubleshooting
 
-- DB smoke-check fails:
-	- Confirm `--db-url` or `OOTP_DB_URL` is correct
-	- Confirm required tables exist after import
-- Team lookup returns no data:
-	- Use full team names exactly as stored in `teams` (`name + nickname`)
-- FK import errors during SQL load:
-	- Re-run `scripts/import_mysql.sh`; it includes automatic key repair before FK application
+- DB smoke-check fails
+  - confirm `--db-url` or `OOTP_DB_URL` is correct
+  - confirm required tables exist after import
+- Team lookup returns no data
+  - use full team names exactly as stored in `teams`
+- Standings or OOTP date are missing in the hero
+  - confirm the DB includes `leagues` and `team_record` data
+- FK import errors during SQL load
+  - rerun `scripts/import_mysql.sh`; it includes automatic key repair before FK application
 
-## Quick Start (DB)
+## Quick Start
+
+### DB workflow
 
 ```bash
 ./scripts/import_mysql.sh ootp_db -u root -p
-python scripts/generate.py --source db --db-url 'mysql+pymysql://root:YOUR_PASSWORD@127.0.0.1:3306/ootp_db'
+./scripts/build.sh
+```
+
+### CSV workflow
+
+```bash
+python scripts/generate.py --source csv
 ```
