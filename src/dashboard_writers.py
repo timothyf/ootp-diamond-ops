@@ -407,6 +407,10 @@ class DashboardOutputWriter:
                 "late-inning relievers rise to the top, while the remaining arms are slotted beneath "
                 "them based on overall bullpen fit."
             ),
+            "Recommended transactions": (
+                "This page groups the most actionable roster moves by transaction family so you can quickly scan "
+                "promotions, corresponding MLB exits, and cases where the organization likely needs outside help."
+            ),
         }
         return descriptions.get(section.title)
 
@@ -548,6 +552,55 @@ class DashboardOutputWriter:
             f"This {club_type} hub keeps {team_name}'s reports organized by roster area so you can move from "
             f"summary to player boards to planning pages without jumping across unrelated reports."
         )
+
+    @staticmethod
+    def _transaction_category(move_type: object) -> str:
+        text = str(move_type or "").strip().upper()
+        if text.startswith("CALL UP"):
+            return "Call Ups"
+        if text.startswith("SEND DOWN"):
+            return "Send Downs"
+        if text.startswith("DFA / BENCH"):
+            return "DFA / Bench"
+        if text.startswith("ACQUIRE"):
+            return "External Acquisitions"
+        return "Other"
+
+    def _recommended_transactions_tables(self, df: pd.DataFrame) -> str:
+        if df.empty:
+            return '<section class="section-card"><h2>Recommended transactions</h2><p>No rows in this report.</p></section>'
+
+        if "move_type" not in df.columns:
+            return f"""
+            <section class="section-card">
+              <h2>Recommended transactions</h2>
+              <div class="table-wrap">
+                {self.html_table(df, allow_html=True)}
+              </div>
+            </section>
+            """
+
+        ordered_categories = ["Call Ups", "Send Downs", "DFA / Bench", "External Acquisitions", "Other"]
+        categorized = df.copy()
+        categorized["_category"] = categorized["move_type"].map(self._transaction_category)
+
+        sections: list[str] = []
+        for category in ordered_categories:
+            group_df = categorized.loc[categorized["_category"] == category].drop(columns=["_category"], errors="ignore")
+            if group_df.empty:
+                continue
+            sections.append(
+                f"""
+                <section class="section-card">
+                  <h2>{escape(category)}</h2>
+                  <p>{len(group_df)} recommendation(s) in this category.</p>
+                  <div class="table-wrap">
+                    {self.html_table(group_df, allow_html=True)}
+                  </div>
+                </section>
+                """
+            )
+        return "".join(sections)
 
     def _write_html_outputs(self, outputs: DashboardOutputs, frames: dict[str, pd.DataFrame]) -> None:
         sections = self.output_sections(outputs)
@@ -750,16 +803,25 @@ class DashboardOutputWriter:
             extra_body = ""
             if section.title == "Recommended rotation":
                 extra_body = self._rotation_candidate_table(frames, player_links)
-            body = f"""
-            <section class="section-card">
-              <h2>{escape(section.title)}</h2>
-              <p>{escape(description) if description else f"{len(section.df)} rows in this report."}</p>
-              <div class="table-wrap">
-                                {self.html_table(linked_df, allow_html=True, highlight_starters=section.highlight_starters, column_modes=section.column_modes, column_labels=section.column_labels, default_mode=section.default_mode)}
-              </div>
-            </section>
-            {extra_body}
-            """
+            if section.title == "Recommended transactions":
+                body = f"""
+                <section class="section-card">
+                  <h2>{escape(section.title)}</h2>
+                  <p>{escape(description) if description else f"{len(section.df)} rows in this report."}</p>
+                </section>
+                {self._recommended_transactions_tables(linked_df)}
+                """
+            else:
+                body = f"""
+                <section class="section-card">
+                  <h2>{escape(section.title)}</h2>
+                  <p>{escape(description) if description else f"{len(section.df)} rows in this report."}</p>
+                  <div class="table-wrap">
+                                    {self.html_table(linked_df, allow_html=True, highlight_starters=section.highlight_starters, column_modes=section.column_modes, column_labels=section.column_labels, default_mode=section.default_mode)}
+                  </div>
+                </section>
+                {extra_body}
+                """
             (self.out_dir / f"{slug}.html").write_text(
                 self.html_shell(section.title, body, active_nav),
                 encoding="utf-8",

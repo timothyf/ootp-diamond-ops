@@ -310,7 +310,7 @@ def build_html_shell(
       border-radius: 28px;
       background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03)),
-        rgba(17, 72, 80, 0.56);
+        rgba(17, 72, 80, 0);
       border: 2px solid rgba(158, 231, 255, 0.7);
       color: rgba(249, 247, 241, 0.94);
       box-shadow:

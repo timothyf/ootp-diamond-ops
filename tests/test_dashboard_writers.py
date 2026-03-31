@@ -22,7 +22,13 @@ def _sample_outputs() -> DashboardOutputs:
     )
     lineup = pd.DataFrame([{"player_name": "Alice", "score": 4.567}])
     rotation = pd.DataFrame([{"player_name": "Bob", "score": 3.456, "ip": 5.1}])
-    transactions = pd.DataFrame([{"player_name": "Alice", "score": 0.5}])
+    transactions = pd.DataFrame(
+        [
+            {"move_type": "CALL UP HITTER", "player_name": "Alice", "score": 0.5, "possible_replace": "Bob", "score_gap": 1.2},
+            {"move_type": "SEND DOWN PITCHER", "player_name": "Charlie", "score": 0.2, "possible_replace": "Delta", "score_gap": 0.8},
+            {"move_type": "ACQUIRE HITTER", "player_name": "Corner bat / DH", "score": 0.1, "possible_replace": "Echo", "score_gap": 0.5},
+        ]
+    )
     return DashboardOutputs(
         mlb_hitters_dashboard=hitters.copy(),
         mlb_pitchers_dashboard=pitchers.copy(),
@@ -249,6 +255,7 @@ class DashboardWriterTests(unittest.TestCase):
             lineup_html = (out_dir / "recommended_lineup_vs_rhp.html").read_text(encoding="utf-8")
             rotation_html = (out_dir / "recommended_rotation.html").read_text(encoding="utf-8")
             bullpen_html = (out_dir / "bullpen_roles.html").read_text(encoding="utf-8")
+            transactions_html = (out_dir / "recommended_transactions.html").read_text(encoding="utf-8")
             scoring_html = (out_dir / "scoring_info.html").read_text(encoding="utf-8")
 
             self.assertIn("Detroit hitters", dashboard_html)
@@ -269,6 +276,9 @@ class DashboardWriterTests(unittest.TestCase):
             self.assertIn("Charlie", rotation_html)
             self.assertIn("Delta", rotation_html)
             self.assertIn("add relief-specific credit for saves, holds", bullpen_html)
+            self.assertIn("Call Ups", transactions_html)
+            self.assertIn("Send Downs", transactions_html)
+            self.assertIn("External Acquisitions", transactions_html)
             self.assertIn("Score Breakdown Guide", scoring_html)
             self.assertIn("Formula Weight Shares", scoring_html)
             self.assertIn("Empirical Normalized Shares", scoring_html)

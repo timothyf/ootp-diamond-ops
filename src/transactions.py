@@ -36,6 +36,60 @@ class TransactionEngine:
             return "MONITOR"
         return "HOLD"
 
+    @staticmethod
+    def _num(row: pd.Series | None, column: str) -> float:
+        if row is None:
+            return 0.0
+        return float(pd.to_numeric(pd.Series([row.get(column)]), errors="coerce").fillna(0.0).iloc[0])
+
+    @staticmethod
+    def _pos(row: pd.Series | None) -> str:
+        return str(row.get("pos_bucket", "")).strip() if row is not None else ""
+
+    def _recommended_hitter_exit_type(self, row: pd.Series | None) -> str | None:
+        if row is None:
+            return None
+        age = self._num(row, "age_val")
+        bucket = self._pos(row)
+        score = self._num(row, "overall_hitter_score")
+        pa_val = self._num(row, "pa_val")
+        if age >= 30 and score >= 10.0:
+            return None
+        if age >= 31 and bucket in {"1B", "COF", "DH"}:
+            return "DFA / BENCH HITTER"
+        if age <= 28 or pa_val < 120:
+            return "SEND DOWN HITTER"
+        return None
+
+    def _recommended_pitcher_exit_type(self, row: pd.Series | None) -> str | None:
+        if row is None:
+            return None
+        age = self._num(row, "age_val")
+        score = self._num(row, "score")
+        ip_val = self._num(row, "ip_val")
+        is_starter = bool(row.get("true_starter_flag", False))
+        if age >= 30 and score >= 9.5:
+            return None
+        if age >= 32 and not is_starter:
+            return "DFA / BENCH PITCHER"
+        if age <= 29 or ip_val < 40:
+            return "SEND DOWN PITCHER"
+        return None
+
+    def _acquire_hitter_profile(self, row: pd.Series | None) -> str:
+        bucket = self._pos(row)
+        if bucket in {"C", "SS", "CF"}:
+            return "Up-the-middle regular"
+        if bucket in {"2B", "3B"}:
+            return "Everyday infield bat"
+        return "Corner bat / DH"
+
+    def _acquire_pitcher_profile(self, row: pd.Series | None) -> str:
+        if row is None:
+            return "Pitching upgrade"
+        is_starter = bool(row.get("true_starter_flag", False)) or self._num(row, "gs_val") >= 5 or self._num(row, "stamina_now") >= 55
+        return "Back-end starter" if is_starter else "Leverage reliever"
+
     def compute_replacement_penalty(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         top_cut = df["overall_hitter_score"].quantile(0.80) if not df.empty else 0
@@ -149,6 +203,9 @@ class TransactionEngine:
         ).copy()
 
         moves = []
+        hitter_exit_names: set[str] = set()
+        pitcher_exit_names: set[str] = set()
+        used_pitcher_replacements: set[str] = set()
 
         promote_hitters = aaa_hitters.loc[
             (aaa_hitters["is_hitter"]) & (aaa_hitters["recommendation"] == "PROMOTE NOW")
@@ -181,15 +238,42 @@ class TransactionEngine:
                     "likely_casualty": casualty_name,
                     "casualty_score": casualty_score,
                     "roster_note": roster_note,
+                    "priority_value": 4.0 + max(score_gap, 0.0),
                 }
             )
+
+            exit_type = self._recommended_hitter_exit_type(casualty)
+            if casualty is not None and casualty_name and casualty_name not in hitter_exit_names and exit_type:
+                hitter_exit_names.add(casualty_name)
+                casualty_actual_score = self._num(casualty, "overall_hitter_score")
+                moves.append(
+                    {
+                        "move_type": exit_type,
+                        "player_name": casualty_name,
+                        "reason": f"Make room for {row['player_name']}",
+                        "score": casualty_actual_score,
+                        "possible_replace": row["player_name"],
+                        "pos_bucket": self._pos(casualty),
+                        "replace_bucket": bucket,
+                        "score_gap": row["projection_hitter_score"] - casualty_actual_score,
+                        "replace_score": row["projection_hitter_score"],
+                        "likely_casualty": casualty_name,
+                        "casualty_score": casualty_actual_score,
+                        "roster_note": roster_note,
+                        "priority_value": 3.0 + max(row["projection_hitter_score"] - casualty_actual_score, 0.0),
+                    }
+                )
 
         promote_pitchers = aaa_pitchers.loc[
             (aaa_pitchers["is_pitcher"]) & (aaa_pitchers["recommendation"] == "PROMOTE NOW")
         ].sort_values("projection_pitcher_score", ascending=False).head(5)
         for _, row in promote_pitchers.iterrows():
-            replace_name = mlb_weak_pitchers.iloc[0]["player_name"] if not mlb_weak_pitchers.empty else ""
-            replace_score = mlb_weak_pitchers.iloc[0]["score"] if not mlb_weak_pitchers.empty else 0
+            available_pitchers = mlb_weak_pitchers.loc[~mlb_weak_pitchers["player_name"].isin(used_pitcher_replacements)]
+            replace_row = available_pitchers.iloc[0] if not available_pitchers.empty else (mlb_weak_pitchers.iloc[0] if not mlb_weak_pitchers.empty else None)
+            replace_name = replace_row["player_name"] if replace_row is not None else ""
+            replace_score = self._num(replace_row, "score")
+            if replace_name:
+                used_pitcher_replacements.add(replace_name)
 
             moves.append(
                 {
@@ -209,7 +293,113 @@ class TransactionEngine:
                         if replace_name
                         else "No clear one-for-one target; consider staff shuffle."
                     ),
+                    "priority_value": 4.0 + max(row["projection_pitcher_score"] - replace_score, 0.0),
                 }
             )
 
-        return aaa_hitters, aaa_pitchers, pd.DataFrame(moves)
+            exit_type = self._recommended_pitcher_exit_type(replace_row)
+            if replace_row is not None and replace_name and replace_name not in pitcher_exit_names and exit_type:
+                pitcher_exit_names.add(replace_name)
+                moves.append(
+                    {
+                        "move_type": exit_type,
+                        "player_name": replace_name,
+                        "reason": f"Make room for {row['player_name']}",
+                        "score": replace_score,
+                        "possible_replace": row["player_name"],
+                        "pos_bucket": "P",
+                        "replace_bucket": "P",
+                        "score_gap": row["projection_pitcher_score"] - replace_score,
+                        "replace_score": row["projection_pitcher_score"],
+                        "likely_casualty": replace_name,
+                        "casualty_score": replace_score,
+                        "roster_note": (
+                            f"{replace_name} is the clearest current staff casualty if {row['player_name']} is promoted."
+                        ),
+                        "priority_value": 3.0 + max(row["projection_pitcher_score"] - replace_score, 0.0),
+                    }
+                )
+
+        if not aaa_hitters.empty:
+            top_aaa_hitter_score = float(
+                pd.to_numeric(
+                    aaa_hitters.loc[
+                        aaa_hitters["is_hitter"] & ~aaa_hitters["injured_flag"] & (aaa_hitters["pa_val"] >= 30),
+                        "projection_hitter_score",
+                    ],
+                    errors="coerce",
+                ).max()
+            )
+            if pd.isna(top_aaa_hitter_score):
+                top_aaa_hitter_score = 0.0
+        else:
+            top_aaa_hitter_score = 0.0
+        if promote_hitters.empty and not mlb_weak_hitters.empty:
+            weakest_hitter = mlb_weak_hitters.sort_values("replacement_target_score", ascending=True).iloc[0]
+            weakest_hitter_score = self._num(weakest_hitter, "overall_hitter_score")
+            if top_aaa_hitter_score <= weakest_hitter_score + 0.35:
+                moves.append(
+                    {
+                        "move_type": "ACQUIRE HITTER",
+                        "player_name": self._acquire_hitter_profile(weakest_hitter),
+                        "reason": "Internal promotion options are not strong enough",
+                        "score": weakest_hitter_score + 0.75,
+                        "possible_replace": weakest_hitter["player_name"],
+                        "pos_bucket": self._pos(weakest_hitter),
+                        "replace_bucket": self._pos(weakest_hitter),
+                        "score_gap": (weakest_hitter_score + 0.75) - weakest_hitter_score,
+                        "replace_score": weakest_hitter_score,
+                        "likely_casualty": weakest_hitter["player_name"],
+                        "casualty_score": weakest_hitter_score,
+                        "roster_note": (
+                            f"The club's weakest current hitter spot is {weakest_hitter['player_name']}, "
+                            "and the best AAA alternative does not project as a clear upgrade."
+                        ),
+                        "priority_value": 2.25,
+                    }
+                )
+
+        if not aaa_pitchers.empty:
+            top_aaa_pitcher_score = float(
+                pd.to_numeric(
+                    aaa_pitchers.loc[
+                        aaa_pitchers["is_pitcher"] & ~aaa_pitchers["injured_flag"] & (aaa_pitchers["ip_val"] >= 10),
+                        "projection_pitcher_score",
+                    ],
+                    errors="coerce",
+                ).max()
+            )
+            if pd.isna(top_aaa_pitcher_score):
+                top_aaa_pitcher_score = 0.0
+        else:
+            top_aaa_pitcher_score = 0.0
+        if promote_pitchers.empty and not mlb_weak_pitchers.empty:
+            weakest_pitcher = mlb_weak_pitchers.iloc[0]
+            weakest_pitcher_score = self._num(weakest_pitcher, "score")
+            if top_aaa_pitcher_score <= weakest_pitcher_score + 0.35:
+                moves.append(
+                    {
+                        "move_type": "ACQUIRE PITCHER",
+                        "player_name": self._acquire_pitcher_profile(weakest_pitcher),
+                        "reason": "Internal promotion options are not strong enough",
+                        "score": weakest_pitcher_score + 0.75,
+                        "possible_replace": weakest_pitcher["player_name"],
+                        "pos_bucket": "P",
+                        "replace_bucket": "P",
+                        "score_gap": (weakest_pitcher_score + 0.75) - weakest_pitcher_score,
+                        "replace_score": weakest_pitcher_score,
+                        "likely_casualty": weakest_pitcher["player_name"],
+                        "casualty_score": weakest_pitcher_score,
+                        "roster_note": (
+                            f"The club's weakest current pitcher is {weakest_pitcher['player_name']}, "
+                            "and the best AAA arm does not project as a clear upgrade."
+                        ),
+                        "priority_value": 2.2,
+                    }
+                )
+
+        moves_df = pd.DataFrame(moves)
+        if not moves_df.empty:
+            moves_df = moves_df.sort_values(["priority_value", "score_gap"], ascending=[False, False]).reset_index(drop=True)
+            moves_df = moves_df.drop(columns=["priority_value"], errors="ignore")
+        return aaa_hitters, aaa_pitchers, moves_df
