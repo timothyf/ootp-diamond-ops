@@ -6,7 +6,7 @@ from typing import Callable
 
 import pandas as pd
 
-from src.dashboard_types import DashboardOutputs, DashboardSection
+from src.dashboard_types import CompletedSeasonSummary, CompletedSeasonTeamSummary, DashboardOutputs, DashboardSection
 
 
 class DashboardOutputWriter:
@@ -24,6 +24,7 @@ class DashboardOutputWriter:
         link_player_names: Callable[[pd.DataFrame, dict[str, str]], pd.DataFrame],
         round_score_columns: Callable[[pd.DataFrame], pd.DataFrame],
         format_ip_columns: Callable[[pd.DataFrame], pd.DataFrame],
+        completed_season_summary: CompletedSeasonSummary | None = None,
     ) -> None:
         self.out_dir = out_dir
         self.mlb_team_name = mlb_team_name
@@ -37,6 +38,7 @@ class DashboardOutputWriter:
         self.link_player_names = link_player_names
         self.round_score_columns = round_score_columns
         self.format_ip_columns = format_ip_columns
+        self.completed_season_summary = completed_season_summary
 
     @staticmethod
     def _series(df: pd.DataFrame, column: str) -> pd.Series:
@@ -218,6 +220,102 @@ class DashboardOutputWriter:
             f"<td>{ratings:.2f}%</td>"
             f"<td>{other:.2f}%</td>"
             "</tr>"
+        )
+
+    @staticmethod
+    def _playoff_result_text(summary: CompletedSeasonTeamSummary) -> str:
+        if summary.won_playoffs:
+            return "Won the league championship."
+        if summary.made_playoffs:
+            return "Reached the postseason."
+        return "Missed the postseason."
+
+    @staticmethod
+    def _season_summary_card(label: str, value: str) -> str:
+        return (
+            '<article class="summary-card">'
+            f'<span class="eyebrow">{escape(label)}</span>'
+            f"<strong>{escape(value)}</strong>"
+            "</article>"
+        )
+
+    def _season_team_section(self, summary: CompletedSeasonTeamSummary) -> str:
+        record_text = "N/A"
+        if summary.wins is not None and summary.losses is not None:
+            record_text = f"{summary.wins}-{summary.losses}"
+
+        position_text = "N/A"
+        if summary.position is not None:
+            suffix = "th"
+            if 10 <= summary.position % 100 <= 20:
+                suffix = "th"
+            else:
+                suffix = {1: "st", 2: "nd", 3: "rd"}.get(summary.position % 10, "th")
+            position_text = f"{summary.position}{suffix}"
+
+        gb_text = "N/A"
+        if summary.gb is not None:
+            gb_text = str(int(summary.gb)) if float(summary.gb).is_integer() else f"{float(summary.gb):.1f}"
+
+        top_names = [
+            ("Best hitter", summary.best_hitter or "Not available"),
+            ("Best pitcher", summary.best_pitcher or "Not available"),
+            ("Best rookie", summary.best_rookie or "Not available"),
+        ]
+        spotlight_rows = "".join(
+            f"<tr><th>{escape(label)}</th><td>{escape(value)}</td></tr>"
+            for label, value in top_names
+        )
+
+        return f"""
+        <section class="section-card">
+          <h2>{escape(summary.team_name)}</h2>
+          <p>{escape(self._playoff_result_text(summary))}</p>
+          <section class="summary-grid">
+            {self._season_summary_card("Record", record_text)}
+            {self._season_summary_card("Position", position_text)}
+            {self._season_summary_card("GB", gb_text)}
+            {self._season_summary_card("Postseason", "Yes" if summary.made_playoffs else "No")}
+          </section>
+          <div class="table-wrap">
+            <table class="data-table" data-sortable="false" data-highlight-starters="false" data-default-mode="">
+              <thead><tr><th>Season spotlight</th><th>Selection</th></tr></thead>
+              <tbody>{spotlight_rows}</tbody>
+            </table>
+          </div>
+        </section>
+        """
+
+    def _write_season_summary_page(self) -> None:
+        season_summary_path = self.out_dir / "season_summary.html"
+        if self.completed_season_summary is None:
+            if season_summary_path.exists():
+                season_summary_path.unlink()
+            return
+
+        summary = self.completed_season_summary
+        body = f"""
+        <section class="dashboard-overview">
+          <section class="section-card">
+            <h2>{summary.season_year} Season Summary</h2>
+            <p>
+              This page appears when the OOTP history tables show that the {summary.season_year} season has been
+              completed for both the MLB and AAA clubs. It gives a quick end-of-season snapshot of record, finish,
+              postseason result, and key award-style standouts for each team.
+            </p>
+            <div class="section-meta-row">
+              <span class="section-meta-pill">{summary.season_year} completed season</span>
+              <span class="section-meta-pill">{escape(summary.mlb.team_name)}</span>
+              <span class="section-meta-pill">{escape(summary.aaa.team_name)}</span>
+            </div>
+          </section>
+          {self._season_team_section(summary.mlb)}
+          {self._season_team_section(summary.aaa)}
+        </section>
+        """
+        season_summary_path.write_text(
+            self.html_shell(f"{summary.season_year} Season Summary", body, "season_summary"),
+            encoding="utf-8",
         )
 
     def _write_scoring_info_page(self, frames: dict[str, pd.DataFrame]) -> None:
@@ -676,6 +774,7 @@ class DashboardOutputWriter:
             self.html_shell("OOTP DiamondOps", dashboard_body, "dashboard"),
             encoding="utf-8",
         )
+        self._write_season_summary_page()
         self._write_scoring_info_page(frames)
 
         def team_hub_body(team_name: str, prefix: str, intro: str) -> str:

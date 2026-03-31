@@ -169,6 +169,7 @@ def build_html_shell(
     ootp_export_date: str | None,
     team_header_summaries: dict[str, dict[str, object] | None] | None = None,
     active_page: str | None = None,
+    show_season_summary: bool = False,
 ) -> str:
     mlb_home_slug = slugify(f"{mlb_team_name} team")
     aaa_home_slug = slugify(f"{aaa_team_name} team")
@@ -188,9 +189,15 @@ def build_html_shell(
             f"{aaa_team_name}",
         ),
         ("team_needs", "team_needs.html", "Team Needs"),
+    ]
+    if show_season_summary:
+        nav_items.append(("season_summary", "season_summary.html", "Season Summary"))
+    nav_items.extend(
+        [
         ("scoring_info", "scoring_info.html", "Scoring"),
         ("recommended_transactions", "recommended_transactions.html", "Transactions"),
-    ]
+        ]
+    )
     nav_links = "".join(
         f'<a class="{"is-active" if key == active_page else ""}" href="{href}">{escape(label)}</a>'
         for key, href, label in nav_items

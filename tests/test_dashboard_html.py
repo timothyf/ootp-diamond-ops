@@ -48,6 +48,7 @@ class DashboardHtmlTests(unittest.TestCase):
                 "aaa": {"team_name": "Toledo Mud Hens", "wins": 6, "losses": 5, "position": 2, "gb": 1.5},
             },
             active_page="toledo_mud_hens_team",
+            show_season_summary=True,
         )
 
         self.assertIn("Detroit Team", html)
@@ -55,6 +56,7 @@ class DashboardHtmlTests(unittest.TestCase):
         self.assertIn("detroit_tigers_team.html", html)
         self.assertIn("toledo_mud_hens_team.html", html)
         self.assertIn("team_needs.html", html)
+        self.assertIn("season_summary.html", html)
         self.assertIn("scoring_info.html", html)
         self.assertIn('class="is-active" href="toledo_mud_hens_team.html"', html)
         self.assertIn("OOTP Date: Unknown", html)
@@ -89,6 +91,7 @@ class DashboardHtmlTests(unittest.TestCase):
         self.assertIn("Record unavailable", html)
         self.assertIn("Position unavailable", html)
         self.assertIn("GB unavailable", html)
+        self.assertNotIn("season_summary.html", html)
 
 
 if __name__ == "__main__":

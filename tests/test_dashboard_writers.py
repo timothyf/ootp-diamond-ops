@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import pandas as pd
 
-from src.dashboard_types import DashboardOutputs
+from src.dashboard_types import CompletedSeasonSummary, CompletedSeasonTeamSummary, DashboardOutputs
 from src.dashboard_types import DashboardSection
 from src.dashboard_utils import slugify
 from src.dashboard_writers import DashboardOutputWriter
@@ -44,7 +44,13 @@ def _sample_outputs() -> DashboardOutputs:
 
 
 class DashboardWriterTests(unittest.TestCase):
-    def _build_writer(self, out_dir: Path, round_mock: Mock, ip_mock: Mock) -> DashboardOutputWriter:
+    def _build_writer(
+        self,
+        out_dir: Path,
+        round_mock: Mock,
+        ip_mock: Mock,
+        completed_season_summary: CompletedSeasonSummary | None = None,
+    ) -> DashboardOutputWriter:
         def html_table(
             df: pd.DataFrame,
             allow_html: bool = False,
@@ -122,6 +128,7 @@ class DashboardWriterTests(unittest.TestCase):
             link_player_names=link_player_names,
             round_score_columns=round_mock,
             format_ip_columns=ip_mock,
+            completed_season_summary=completed_season_summary,
         )
 
     def test_write_outputs_writes_files_and_applies_formatters(self) -> None:
@@ -185,6 +192,7 @@ class DashboardWriterTests(unittest.TestCase):
             self.assertEqual(ip_mock.call_count, 11)
             self.assertTrue((out_dir / "detroit_hitters_dashboard.csv").exists())
             self.assertTrue((out_dir / "ootp_gm_dashboard.md").exists())
+            self.assertFalse((out_dir / "season_summary.html").exists())
             markdown = (out_dir / "ootp_gm_dashboard.md").read_text(encoding="utf-8")
             self.assertIn("## Recommended lineup vs RHP", markdown)
             self.assertIn("rows=1", markdown)
@@ -283,6 +291,57 @@ class DashboardWriterTests(unittest.TestCase):
             self.assertIn("Formula Weight Shares", scoring_html)
             self.assertIn("Empirical Normalized Shares", scoring_html)
             self.assertIn("Hitters analyzed", scoring_html)
+
+    def test_write_outputs_generates_season_summary_page_when_available(self) -> None:
+        outputs = _sample_outputs()
+        season_summary = CompletedSeasonSummary(
+            season_year=2026,
+            mlb=CompletedSeasonTeamSummary(
+                team_name="Detroit Tigers",
+                wins=89,
+                losses=73,
+                position=2,
+                gb=4.5,
+                made_playoffs=True,
+                won_playoffs=False,
+                best_hitter="Alice Slugger",
+                best_pitcher="Bob Ace",
+                best_rookie="Chris Prospect",
+            ),
+            aaa=CompletedSeasonTeamSummary(
+                team_name="Toledo Mud Hens",
+                wins=92,
+                losses=58,
+                position=1,
+                gb=0.0,
+                made_playoffs=True,
+                won_playoffs=True,
+                best_hitter="Dylan Bat",
+                best_pitcher="Evan Arm",
+                best_rookie="Frank Future",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            out_dir = Path(temp_dir)
+            writer = self._build_writer(
+                out_dir,
+                Mock(side_effect=lambda df: df.copy()),
+                Mock(side_effect=lambda df: df.copy()),
+                completed_season_summary=season_summary,
+            )
+
+            writer.write_outputs(outputs, frames={"mlb_hitters": pd.DataFrame(), "mlb_pitchers": pd.DataFrame()})
+
+            season_html = (out_dir / "season_summary.html").read_text(encoding="utf-8")
+            self.assertIn("<title>2026 Season Summary</title>", season_html)
+            self.assertIn("data-page='season_summary'", season_html)
+            self.assertIn("2026 completed season", season_html)
+            self.assertIn("Detroit Tigers", season_html)
+            self.assertIn("89-73", season_html)
+            self.assertIn("Reached the postseason.", season_html)
+            self.assertIn("Toledo Mud Hens", season_html)
+            self.assertIn("Won the league championship.", season_html)
+            self.assertIn("Frank Future", season_html)
 
 
 if __name__ == "__main__":

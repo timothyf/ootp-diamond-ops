@@ -5,6 +5,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.dashboard_types import CompletedSeasonSummary, CompletedSeasonTeamSummary
+
 
 class CsvRepository:
     def __init__(self, data_dir: Path) -> None:
@@ -19,6 +21,9 @@ class CsvRepository:
 
     def get_team_header_summaries(self) -> dict[str, dict[str, object] | None]:
         return {"mlb": None, "aaa": None}
+
+    def get_completed_season_summary(self) -> CompletedSeasonSummary | None:
+        return None
 
 
 class MySqlRepository:
@@ -246,6 +251,195 @@ class MySqlRepository:
             "mlb": self._get_team_header_summary(self.mlb_team_name),
             "aaa": self._get_team_header_summary(self.aaa_team_name),
         }
+
+    @staticmethod
+    def _parse_export_year(export_date: str | None) -> int | None:
+        text = str(export_date or "").strip()
+        if not text:
+            return None
+        try:
+            return int(text[:4])
+        except ValueError:
+            return None
+
+    def get_completed_season_summary(self) -> CompletedSeasonSummary | None:
+        season_year = self._get_latest_completed_season_year()
+        if season_year is None:
+            return None
+
+        mlb_summary = self._get_completed_season_team_summary(self.mlb_team_name, season_year)
+        aaa_summary = self._get_completed_season_team_summary(self.aaa_team_name, season_year)
+        if mlb_summary is None or aaa_summary is None:
+            return None
+
+        return CompletedSeasonSummary(
+            season_year=season_year,
+            mlb=mlb_summary,
+            aaa=aaa_summary,
+        )
+
+    def _get_latest_completed_season_year(self) -> int | None:
+        from sqlalchemy import text
+
+        export_year = self._parse_export_year(self.get_export_date())
+        if export_year is None:
+            return None
+
+        sql = """
+            WITH latest_history AS (
+                SELECT
+                    TRIM(CONCAT(COALESCE(t.name, ''), ' ', COALESCE(t.nickname, ''))) AS full_name,
+                    MAX(th.year) AS latest_year
+                FROM teams t
+                JOIN team_history th ON th.team_id = t.team_id
+                WHERE TRIM(CONCAT(COALESCE(t.name, ''), ' ', COALESCE(t.nickname, ''))) IN (:mlb_team_name, :aaa_team_name)
+                GROUP BY full_name
+            )
+            SELECT MIN(latest_year) AS common_year, COUNT(*) AS team_count
+            FROM latest_history
+        """
+        try:
+            with self._engine.connect() as conn:
+                row = conn.execute(
+                    text(sql),
+                    {
+                        "mlb_team_name": self.mlb_team_name,
+                        "aaa_team_name": self.aaa_team_name,
+                    },
+                ).fetchone()
+        except Exception:
+            return None
+
+        if row is None:
+            return None
+
+        data = row._mapping if hasattr(row, "_mapping") else row
+        team_count = data.get("team_count", 0)
+        common_year = data.get("common_year")
+        if team_count != 2 or common_year is None:
+            return None
+
+        season_year = int(common_year)
+        current_games = self._get_current_team_games_played()
+        if not self._should_show_completed_season_summary(export_year, season_year, current_games):
+            return None
+        return season_year
+
+    @staticmethod
+    def _should_show_completed_season_summary(
+        export_year: int | None,
+        completed_season_year: int | None,
+        current_team_games: dict[str, int | None] | None,
+    ) -> bool:
+        if export_year is None or completed_season_year is None:
+            return False
+        if completed_season_year == export_year:
+            return True
+        if completed_season_year != export_year - 1:
+            return False
+
+        current_team_games = current_team_games or {}
+        for value in current_team_games.values():
+            if value is None:
+                continue
+            if int(value) > 0:
+                return False
+        return True
+
+    def _get_current_team_games_played(self) -> dict[str, int | None]:
+        from sqlalchemy import text
+
+        sql = """
+            SELECT
+                TRIM(CONCAT(COALESCE(t.name, ''), ' ', COALESCE(t.nickname, ''))) AS full_name,
+                tr.g AS games_played
+            FROM teams t
+            LEFT JOIN team_record tr ON tr.team_id = t.team_id
+            WHERE TRIM(CONCAT(COALESCE(t.name, ''), ' ', COALESCE(t.nickname, ''))) IN (:mlb_team_name, :aaa_team_name)
+        """
+        try:
+            with self._engine.connect() as conn:
+                rows = conn.execute(
+                    text(sql),
+                    {
+                        "mlb_team_name": self.mlb_team_name,
+                        "aaa_team_name": self.aaa_team_name,
+                    },
+                ).fetchall()
+        except Exception:
+            return {}
+
+        games_by_team: dict[str, int | None] = {}
+        for row in rows:
+            data = row._mapping if hasattr(row, "_mapping") else row
+            full_name = str(data.get("full_name") or "").strip()
+            games_played = data.get("games_played")
+            games_by_team[full_name] = int(games_played) if games_played is not None else None
+        return games_by_team
+
+    def _get_completed_season_team_summary(
+        self,
+        team_name: str,
+        season_year: int,
+    ) -> CompletedSeasonTeamSummary | None:
+        from sqlalchemy import text
+
+        sql = """
+            SELECT
+                TRIM(CONCAT(COALESCE(t.name, ''), ' ', COALESCE(t.nickname, ''))) AS full_name,
+                thr.w AS wins,
+                thr.l AS losses,
+                COALESCE(th.position_in_division, thr.pos) AS division_position,
+                thr.gb AS games_back,
+                COALESCE(th.made_playoffs, 0) AS made_playoffs,
+                COALESCE(th.won_playoffs, 0) AS won_playoffs,
+                TRIM(CONCAT(COALESCE(best_hitter.first_name, ''), ' ', COALESCE(best_hitter.last_name, ''))) AS best_hitter_name,
+                TRIM(CONCAT(COALESCE(best_pitcher.first_name, ''), ' ', COALESCE(best_pitcher.last_name, ''))) AS best_pitcher_name,
+                TRIM(CONCAT(COALESCE(best_rookie.first_name, ''), ' ', COALESCE(best_rookie.last_name, ''))) AS best_rookie_name
+            FROM teams t
+            JOIN team_history th
+                ON th.team_id = t.team_id
+                AND th.year = :season_year
+            LEFT JOIN team_history_record thr
+                ON thr.team_id = t.team_id
+                AND thr.year = th.year
+            LEFT JOIN players best_hitter ON best_hitter.player_id = th.best_hitter_id
+            LEFT JOIN players best_pitcher ON best_pitcher.player_id = th.best_pitcher_id
+            LEFT JOIN players best_rookie ON best_rookie.player_id = th.best_rookie_id
+            WHERE TRIM(CONCAT(COALESCE(t.name, ''), ' ', COALESCE(t.nickname, ''))) = :team_name
+            ORDER BY t.team_id
+            LIMIT 1
+        """
+        try:
+            with self._engine.connect() as conn:
+                row = conn.execute(
+                    text(sql),
+                    {"team_name": team_name, "season_year": season_year},
+                ).fetchone()
+        except Exception:
+            return None
+
+        if row is None:
+            return None
+
+        data = row._mapping if hasattr(row, "_mapping") else row
+
+        def _clean_name(value: object) -> str | None:
+            text = str(value or "").strip()
+            return text if text else None
+
+        return CompletedSeasonTeamSummary(
+            team_name=self._clean_team_name(data.get("full_name"), team_name),
+            wins=int(data.get("wins")) if data.get("wins") is not None else None,
+            losses=int(data.get("losses")) if data.get("losses") is not None else None,
+            position=int(data.get("division_position")) if data.get("division_position") is not None else None,
+            gb=float(data.get("games_back")) if data.get("games_back") is not None else None,
+            made_playoffs=bool(data.get("made_playoffs")),
+            won_playoffs=bool(data.get("won_playoffs")),
+            best_hitter=_clean_name(data.get("best_hitter_name")),
+            best_pitcher=_clean_name(data.get("best_pitcher_name")),
+            best_rookie=_clean_name(data.get("best_rookie_name")),
+        )
 
     def _get_team_header_summary(self, team_name: str) -> dict[str, object] | None:
         from sqlalchemy import text

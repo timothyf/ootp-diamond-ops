@@ -7,7 +7,7 @@ import pandas as pd
 
 from src.data_processing import CsvRepository, PlayerDataTransformer
 from src.dashboard_html import build_html_shell, html_table as render_html_table
-from src.dashboard_types import DashboardOutputs, DashboardSection
+from src.dashboard_types import CompletedSeasonSummary, DashboardOutputs, DashboardSection
 from src.dashboard_utils import (
     format_ip_columns,
     md_table,
@@ -83,6 +83,11 @@ class DashboardGenerator:
             if hasattr(self.repository, "get_team_header_summaries")
             else {"mlb": None, "aaa": None}
         )
+        self.completed_season_summary: CompletedSeasonSummary | None = (
+            self.repository.get_completed_season_summary()
+            if hasattr(self.repository, "get_completed_season_summary")
+            else None
+        )
         self.transformer = transformer or PlayerDataTransformer()
         self.metrics = metrics or MetricsCalculator(self.transformer)
         self.lineup_planner = lineup_planner or LineupPlanner()
@@ -153,6 +158,7 @@ class DashboardGenerator:
             ootp_export_date=self.ootp_export_date,
             team_header_summaries=self.team_header_summaries,
             active_page=active_page,
+            show_season_summary=self.completed_season_summary is not None,
         )
 
     def _output_sections(self, outputs: DashboardOutputs) -> list[DashboardSection]:
@@ -301,6 +307,7 @@ class DashboardGenerator:
             link_player_names=self._link_player_names,
             round_score_columns=self._round_score_columns,
             format_ip_columns=self._format_ip_columns,
+            completed_season_summary=self.completed_season_summary,
         )
 
     def _write_html_outputs(self, outputs: DashboardOutputs) -> None:
