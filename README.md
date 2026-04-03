@@ -1,94 +1,197 @@
 # OOTP DiamondOps
 
-OOTP DiamondOps generates a baseball operations dashboard for an MLB club and its AAA affiliate from OOTP exports. It produces scored roster boards, planning pages, transaction guidance, and linked HTML reports for front-office review.
+OOTP DiamondOps generates a baseball operations site for an MLB club and its AAA affiliate from OOTP exports. It combines current performance, OOTP ratings, roster status, and organizational depth into linked HTML reports, CSV tables, and a Markdown summary for front-office review.
 
-## Current Functionality
+## What It Produces
 
-From one run, DiamondOps currently produces:
+One run currently generates:
 
-- A landing dashboard with grouped sections for:
-  - `Decisions now`
-  - `MLB snapshot`
-  - `AAA watchlist`
-- Team hub pages for the MLB and AAA clubs
-- Merged hitter and pitcher tables with an in-page `Current` / `Stats` toggle
+- A status-oriented `dashboard.html` landing page
+- MLB and AAA team hub pages
+- Merged hitter and pitcher boards with in-page `Current` / `Stats` toggles
 - MLB active depth chart
-- Recommended lineups vs RHP and vs LHP
-- Platoon diagnostics
-- Recommended rotation
-- Spot starter / replacement starter candidates
-- Bullpen role recommendations
-- Team needs / acquisition-priority report
-- Recommended transactions
-- Scoring breakdown page
-- Player detail pages linked from report tables
-- CSV outputs for the core report tables
-- A consolidated Markdown report for quick review
+- `Recommended lineup vs RHP`
+- `Recommended lineup vs LHP`
+- `Platoon diagnostics`
+- `Recommended rotation`
+- `Spot Starter / Replacement Candidates` on the rotation page
+- `Bullpen roles`
+- `Team needs`
+- `Recommended transactions`, grouped by move type
+- `Scoring Breakdown`
+- Linked player detail pages
+- Team dashboard CSVs
+- A consolidated Markdown report
 
-HTML pages include a shared site shell with:
+When a season has been completed, DiamondOps also generates:
 
-- A branded hero header
+- `season_summary.html`
+
+That season summary page stays visible during the following offseason and disappears once the new season has started.
+
+All generated outputs are written to `output/`.
+
+## Current Site Structure
+
+### Dashboard
+
+The landing dashboard is now a quick status board rather than a set of page summaries. It is designed to answer “how is the organization doing right now?” at a glance.
+
+It currently includes:
+
+- Organization status cards:
+  - high-priority needs
+  - MLB injuries
+  - call-up pressure
+  - outside-help pressure
+  - AAA watchlist size
+- MLB leader tables:
+  - top MLB hitters
+  - top MLB pitchers
+- Pressure-point tables:
+  - current needs
+  - current injured MLB players
+- AAA watch tables:
+  - top AAA hitters
+  - top AAA pitchers
+
+### Team Hubs
+
+Both the MLB and AAA team pages are organized consistently into:
+
+- `Position players`
+- `Pitching`
+- `Planning & decisions`
+
+These hub pages act as the main navigation layer into the full report set.
+
+### Shared HTML Shell
+
+All HTML pages share a common site shell with:
+
+- a branded hero/header
+- DiamondOps logo
 - OOTP date
-- MLB and AAA team record, division position, and games back
-- Team logos in the header status cards
-- Shared top navigation across reports
+- MLB and AAA records, division position, and GB
+- MLB and AAA team logos in the header
+- shared top navigation
+- consistent page width across reports
 
-Outputs are written to `output/`.
+## Key Reports
 
-## Report Structure
+### Hitter and Pitcher Boards
 
-The generated HTML site is organized around a few core entry points:
+The MLB and AAA hitter/pitcher pages use merged tables with a `Current` / `Stats` toggle instead of separate pages.
 
-- `dashboard.html`
-  - high-level landing page with the most actionable reports first
-- MLB team hub
-  - grouped into `Position players`, `Pitching`, and `Planning & decisions`
-- AAA team hub
-  - grouped into the same high-level areas for consistency
-- Standalone report pages
-  - full tables and descriptions for each recommendation or board
+- `Current` emphasizes current-value columns and roster context
+- `Stats` emphasizes raw statistical production
+- column formatting includes baseball-specific cleanup such as MLB-style innings pitched notation
+
+### Team Needs
+
+The `Team needs` page identifies likely acquisition targets by analyzing:
+
+- current MLB quality
+- AAA cover
+- age risk
+- handedness balance
+- bullpen/rotation depth
+
+It is intended to answer where the organization most needs outside help.
+
+### Recommended Transactions
+
+The transactions page is no longer limited to call-ups. It can now recommend:
+
+- `CALL UP`
+- `SEND DOWN`
+- `DFA / BENCH`
+- `ACQUIRE`
+
+The page renders separate tables by transaction family so it is easier to scan.
+
+### Recommended Lineups
+
+Both lineup pages use the same selection pipeline:
+
+- lock in the best healthy regulars at premium defensive spots
+- optimize `1B`, `LF`, `RF`, and `DH` for the opposing pitcher handedness
+- set batting order from role-based lineup scores
+
+### Rotation and Bullpen
+
+Pitching planning pages include:
+
+- recommended MLB rotation
+- spot-starter / replacement-starter candidates
+- bullpen role recommendations
+
+### Scoring Breakdown
+
+The scoring page explains how hitter and pitcher scores are built from:
+
+- stats
+- ratings
+- smaller context bonuses
+
+It includes both formula-share and empirical-share views.
+
+### Season Summary
+
+When historical season data is available for both clubs, the season summary page shows:
+
+- season year
+- MLB and AAA final records
+- division finish
+- games back
+- postseason result
+- best hitter
+- best pitcher
+- best rookie
 
 ## Data Sources
 
-DiamondOps supports two modes:
+DiamondOps supports two input modes.
 
-- CSV mode
-  - reads OOTP-style CSV exports from `src/data/`
-- MySQL mode
-  - reads from a MySQL database populated from OOTP SQL exports
+### CSV mode
 
-MySQL mode also supports:
+- reads OOTP-style CSV exports from `src/data/`
+- does not provide in-game OOTP date or standings header data
 
-- explicit MLB and AAA team-name overrides
-- automatic team detection when overrides are omitted
-- DB smoke checks before generation
-- header standings lookup for the generated HTML site
+### MySQL mode
+
+- reads from a MySQL database populated from OOTP SQL exports
+- supports automatic MLB/AAA team detection
+- supports explicit team-name overrides
+- runs a DB smoke-check before generation
+- populates header standings and OOTP date
+- enables completed-season detection for the season summary page
 
 ## Project Layout
 
 - `scripts/generate.py`
   - main CLI entry point
 - `scripts/build.sh`
-  - convenience script for local DB-backed generation
+  - convenience wrapper for the common local build flow
 - `scripts/import_mysql.sh`
-  - MySQL import helper for OOTP SQL dumps
+  - imports OOTP SQL dumps into MySQL
 - `scripts/test.sh`
-  - runs the unit test suite from the project virtual environment
+  - runs the project test suite
 - `src/`
-  - scoring, data processing, lineup planning, transaction logic, and HTML generation
+  - scoring, data processing, report building, transactions, and HTML generation
 - `src/data/`
-  - CSV input files for CSV mode
+  - CSV inputs for CSV mode
 - `src/images/`
-  - shared site and team logo assets
+  - DiamondOps and team logo assets
 - `sql/`
-  - OOTP SQL export files used by the importer
+  - SQL import assets
 - `output/`
-  - generated CSV, HTML, and Markdown reports
+  - generated HTML, CSV, and Markdown outputs
 
 ## Requirements
 
 - Python 3.10+
-- MySQL client (`mysql`) for the import workflow
+- MySQL client tools for the SQL import workflow
 - Python packages:
 
 ```bash
@@ -99,15 +202,13 @@ pip install pandas numpy sqlalchemy pymysql tabulate
 
 ### Generate from CSV files
 
-This uses CSVs under `src/data/`.
-
 ```bash
 python scripts/generate.py --source csv
 ```
 
 ### Generate from MySQL
 
-Pass a SQLAlchemy MySQL URL directly:
+Direct URL:
 
 ```bash
 python scripts/generate.py \
@@ -115,16 +216,16 @@ python scripts/generate.py \
   --db-url 'mysql+pymysql://root:YOUR_PASSWORD@127.0.0.1:3306/ootp_db'
 ```
 
-Or use environment variables:
+Or environment variable:
 
 ```bash
 export OOTP_DB_URL='mysql+pymysql://root:YOUR_PASSWORD@127.0.0.1:3306/ootp_db'
 python scripts/generate.py
 ```
 
-### Use custom team names in DB mode
+### Generate with explicit team names
 
-Team names must match the full `name + nickname` stored in the database.
+Team names must match the full `name + nickname` stored in OOTP.
 
 ```bash
 python scripts/generate.py \
@@ -136,15 +237,13 @@ python scripts/generate.py \
 
 ### Use the local build helper
 
-For the common local DB workflow:
-
 ```bash
 ./scripts/build.sh
 ```
 
 ## Testing
 
-Run the full test suite:
+Run the full suite:
 
 ```bash
 ./scripts/test.sh
@@ -158,7 +257,7 @@ Equivalent direct command:
 
 ## MySQL Import Workflow
 
-If you export OOTP SQL files into `sql/`, import them with:
+Import OOTP SQL files from `sql/` with:
 
 ```bash
 ./scripts/import_mysql.sh ootp_db -u root -p
@@ -168,45 +267,50 @@ Importer behavior:
 
 - drops and recreates the target database
 - imports tables in dependency-aware order
-- repairs missing parent primary keys before foreign-key import when needed
+- repairs missing parent primary keys before applying foreign keys when needed
 - applies foreign keys from `sql/foreign_keys.mysql.sql` at the end
 
 ## Source Selection Rules
 
-`scripts/generate.py` resolves the data source in this order:
+`scripts/generate.py` chooses the source in this order:
 
 1. explicit `--source`
-2. if `--source` is omitted, DB mode is used when `OOTP_DB_URL` is set
-3. otherwise CSV mode is used
+2. DB mode when `OOTP_DB_URL` is set
+3. otherwise CSV mode
 
 ## Typical Outputs
 
-You should expect files similar to:
+Typical generated files include:
 
 - `output/dashboard.html`
-- `output/scoring_info.html`
+- `output/<mlb_team>_team.html`
+- `output/<aaa_team>_team.html`
 - `output/team_needs.html`
 - `output/recommended_lineup_vs_rhp.html`
 - `output/recommended_lineup_vs_lhp.html`
+- `output/platoon_diagnostics.html`
 - `output/recommended_rotation.html`
 - `output/bullpen_roles.html`
 - `output/recommended_transactions.html`
-- `output/<mlb_team>_team.html`
-- `output/<aaa_team>_team.html`
+- `output/scoring_info.html`
+- `output/season_summary.html` when applicable
 - `output/ootp_gm_dashboard.md`
-- team-specific CSV dashboards for hitters and pitchers
+- team-specific hitter and pitcher dashboard CSVs
 
 ## Troubleshooting
 
 - DB smoke-check fails
-  - confirm `--db-url` or `OOTP_DB_URL` is correct
-  - confirm required tables exist after import
+  - confirm `--db-url` or `OOTP_DB_URL`
+  - confirm required tables imported successfully
 - Team lookup returns no data
-  - use full team names exactly as stored in `teams`
-- Standings or OOTP date are missing in the hero
-  - confirm the DB includes `leagues` and `team_record` data
+  - use full OOTP `name + nickname` values
+- OOTP date or standings are missing in the header
+  - confirm the DB includes `leagues` and `team_record`
+- Season summary does not appear
+  - confirm `team_history` and `team_history_record` are populated for both clubs
+  - confirm the build is either at completed season end or in the following offseason before games begin
 - FK import errors during SQL load
-  - rerun `scripts/import_mysql.sh`; it includes automatic key repair before FK application
+  - rerun `scripts/import_mysql.sh`
 
 ## Quick Start
 
