@@ -140,7 +140,7 @@ class DashboardWriterTests(unittest.TestCase):
             writer = self._build_writer(out_dir, round_mock, ip_mock)
 
             frames = {
-                "mlb_hitters": pd.DataFrame([{"player_name": "Alice"}]),
+                "mlb_hitters": pd.DataFrame([{"player_name": "Alice", "is_hitter": True}]),
                 "mlb_pitchers": pd.DataFrame(
                     [
                         {
@@ -154,6 +154,20 @@ class DashboardWriterTests(unittest.TestCase):
                             "fip_val": 3.4,
                             "rotation_score": 12.5,
                             "true_starter_flag": True,
+                            "swingman_flag": False,
+                        },
+                        {
+                            "player_name": "Spencer Torkelson",
+                            "is_pitcher": False,
+                            "injured_flag": False,
+                            "ip_val": 0.0,
+                            "gs_val": 0,
+                            "stamina_now": 0,
+                            "era_val": 0.0,
+                            "fip_val": 0.0,
+                            "rotation_score": 99.0,
+                            "score": 99.0,
+                            "true_starter_flag": False,
                             "swingman_flag": False,
                         },
                         {
@@ -188,8 +202,8 @@ class DashboardWriterTests(unittest.TestCase):
 
             writer.write_outputs(outputs, frames=frames)
 
-            self.assertEqual(round_mock.call_count, 14)
-            self.assertEqual(ip_mock.call_count, 14)
+            self.assertEqual(round_mock.call_count, 16)
+            self.assertEqual(ip_mock.call_count, 16)
             self.assertTrue((out_dir / "detroit_hitters_dashboard.csv").exists())
             self.assertTrue((out_dir / "ootp_gm_dashboard.md").exists())
             self.assertFalse((out_dir / "season_summary.html").exists())
@@ -274,9 +288,18 @@ class DashboardWriterTests(unittest.TestCase):
             self.assertIn("AAA Watch", dashboard_html)
             self.assertNotIn("Front Office Briefing", dashboard_html)
             self.assertIn("Detroit Team", team_html)
-            self.assertIn("Position players", team_html)
-            self.assertIn("Pitching", team_html)
-            self.assertIn("Planning &amp; decisions", team_html)
+            self.assertIn("Team Snapshot", team_html)
+            self.assertIn("Current lineup core", team_html)
+            self.assertIn("Current pitching core", team_html)
+            self.assertNotIn("Spencer Torkelson", team_html)
+            self.assertIn('href="detroit_hitters.html"', team_html)
+            self.assertIn('href="recommended_rotation.html"', team_html)
+            self.assertIn('href="recommended_transactions.html"', team_html)
+            self.assertNotIn("<h2>Position players</h2>", team_html)
+            self.assertNotIn("<h2>Pitching</h2>", team_html)
+            self.assertNotIn("Planning &amp; decisions", team_html)
+            self.assertNotIn("Linked page", team_html)
+            self.assertNotIn("Preview", team_html)
             self.assertIn("data-highlight='True'", depth_chart_html)
             self.assertIn("data-page='team_needs'", needs_html)
             self.assertIn("highlights the club", needs_html)

@@ -728,6 +728,15 @@ class DashboardOutputWriter:
             return pd.Series(False, index=df.index, dtype=bool)
         return pd.to_numeric(df[column], errors="coerce").fillna(0).astype(bool)
 
+    def _typed_player_pool(self, df: pd.DataFrame, player_type: str) -> pd.DataFrame:
+        if df.empty:
+            return df
+        if player_type == "hitter" and "is_hitter" in df.columns:
+            return df.loc[self._bool_series(df, "is_hitter")].copy()
+        if player_type == "pitcher" and "is_pitcher" in df.columns:
+            return df.loc[self._bool_series(df, "is_pitcher")].copy()
+        return df.copy()
+
     @staticmethod
     def _summary_card_html(label: str, value: str, detail: str) -> str:
         return (
@@ -838,6 +847,147 @@ class DashboardOutputWriter:
           </div>
         </section>
         """
+
+    @staticmethod
+    def _top_player_name(df: pd.DataFrame, score_col: str) -> str:
+        if df.empty or score_col not in df.columns or "player_name" not in df.columns:
+            return "N/A"
+        ranked = df.sort_values(score_col, ascending=False, na_position="last")
+        if ranked.empty:
+            return "N/A"
+        name = str(ranked.iloc[0].get("player_name", "")).strip()
+        return name or "N/A"
+
+    def _team_hub_summary_cards(
+        self,
+        prefix: str,
+        frames: dict[str, pd.DataFrame],
+        grouped_sections: dict[str, list[DashboardSection]],
+    ) -> str:
+        hitters_key = "mlb_hitters" if prefix == "mlb_" else "aaa_hitters"
+        pitchers_key = "mlb_pitchers" if prefix == "mlb_" else "aaa_pitchers"
+        hitter_score = "overall_hitter_score" if prefix == "mlb_" else "projection_hitter_score"
+        pitcher_score = "score" if prefix == "mlb_" else "projection_pitcher_score"
+
+        hitters = self._typed_player_pool(frames.get(hitters_key, pd.DataFrame()), "hitter")
+        pitchers = self._typed_player_pool(frames.get(pitchers_key, pd.DataFrame()), "pitcher")
+        healthy_hitters = int((~self._bool_series(hitters, "injured_flag")).sum()) if not hitters.empty else 0
+        healthy_pitchers = int((~self._bool_series(pitchers, "injured_flag")).sum()) if not pitchers.empty else 0
+        injuries = self._count_injured(hitters) + self._count_injured(pitchers)
+        linked_reports = sum(len(items) for items in grouped_sections.values())
+
+        cards = [
+            self._summary_card_html("Linked reports", str(linked_reports), "Full boards and planning pages available from this hub."),
+            self._summary_card_html("Healthy hitters", str(healthy_hitters), "Position-player pool currently available on this team page."),
+            self._summary_card_html("Healthy pitchers", str(healthy_pitchers), "Pitching pool currently available on this team page."),
+            self._summary_card_html("Injuries", str(injuries), "Current injured players on this level."),
+            self._summary_card_html(
+                "Top hitter",
+                self._top_player_name(hitters, hitter_score),
+                "Highest-ranked bat on the current team board.",
+            ),
+            self._summary_card_html(
+                "Top pitcher",
+                self._top_player_name(pitchers, pitcher_score),
+                "Highest-ranked arm on the current team board.",
+            ),
+        ]
+        return "".join(cards)
+
+    def _team_hub_data_sections(
+        self,
+        prefix: str,
+        frames: dict[str, pd.DataFrame],
+        player_links: dict[str, dict[str, str]],
+    ) -> str:
+        hitters_key = "mlb_hitters" if prefix == "mlb_" else "aaa_hitters"
+        pitchers_key = "mlb_pitchers" if prefix == "mlb_" else "aaa_pitchers"
+        hitter_score = "overall_hitter_score" if prefix == "mlb_" else "projection_hitter_score"
+        pitcher_score = "score" if prefix == "mlb_" else "projection_pitcher_score"
+        hitter_title = "Current lineup core" if prefix == "mlb_" else "Promotion bats to watch"
+        pitcher_title = "Current pitching core" if prefix == "mlb_" else "Promotion arms to watch"
+        hitter_description = (
+            "Best healthy hitters on the current MLB board."
+            if prefix == "mlb_"
+            else "Best healthy AAA hitters by promotion-oriented projection score."
+        )
+        pitcher_description = (
+            "Best healthy pitchers on the current MLB board."
+            if prefix == "mlb_"
+            else "Best healthy AAA pitchers by promotion-oriented projection score."
+        )
+
+        hitters = self._typed_player_pool(frames.get(hitters_key, pd.DataFrame()), "hitter")
+        pitchers = self._typed_player_pool(frames.get(pitchers_key, pd.DataFrame()), "pitcher")
+        top_hitters = self._prepare_dashboard_table(
+            hitters.loc[~self._bool_series(hitters, "injured_flag")].copy() if not hitters.empty else pd.DataFrame(),
+            ["player_name", "primary_position", hitter_score, "ops_val", "war_val", "age_val"],
+            sort_by=hitter_score,
+            rename={
+                "primary_position": "pos",
+                hitter_score: "score",
+                "ops_val": "ops",
+                "war_val": "war",
+                "age_val": "age",
+            },
+        )
+        top_pitchers = self._prepare_dashboard_table(
+            pitchers.loc[~self._bool_series(pitchers, "injured_flag")].copy() if not pitchers.empty else pd.DataFrame(),
+            ["player_name", pitcher_score, "era_val", "fip_val", "ip_val", "age_val"],
+            sort_by=pitcher_score,
+            rename={
+                pitcher_score: "score",
+                "era_val": "era",
+                "fip_val": "fip",
+                "ip_val": "ip",
+                "age_val": "age",
+            },
+        )
+
+        return f"""
+        <section class="dashboard-group">
+          <div class="dashboard-group-heading">
+            <h2>{escape('Team Snapshot')}</h2>
+          </div>
+          <section class="section-grid section-grid-overview">
+            {self._render_dashboard_table_section(hitter_title, hitter_description, top_hitters, hitters_key, player_links)}
+            {self._render_dashboard_table_section(pitcher_title, pitcher_description, top_pitchers, pitchers_key, player_links)}
+          </section>
+        </section>
+        """
+
+    def _team_hub_link_card(self, label: str, section: DashboardSection) -> str:
+        slug = self.slugify(section.title)
+        description = self._section_description(section) or self._section_snapshot_text(section)
+        return f"""
+        <section class="section-card section-card-compact">
+          <header class="section-card-header">
+            <div>
+              <p class="section-kicker">{escape(label)}</p>
+              <h2>{escape(section.title)}</h2>
+            </div>
+            <a class="section-link section-link-inline" href="{slug}.html">Open</a>
+          </header>
+          <p>{escape(description)}</p>
+          <div class="section-meta-row">
+            <span class="section-meta-pill">{len(section.df)} rows</span>
+            <span class="section-meta-pill">Linked page</span>
+          </div>
+        </section>
+        """
+
+    def _team_hub_report_buttons(self, grouped_sections: dict[str, list[DashboardSection]]) -> str:
+        ordered_labels = ("Position players", "Pitching", "Planning & decisions")
+        buttons: list[str] = []
+        for label in ordered_labels:
+            for section in grouped_sections.get(label, []):
+                slug = self.slugify(section.title)
+                buttons.append(
+                    f'<a class="section-meta-pill" href="{slug}.html">{escape(section.title)}</a>'
+                )
+        if not buttons:
+            return ""
+        return f'<div class="section-meta-row">{"".join(buttons)}</div>'
 
     def _dashboard_body(
         self,
@@ -1033,63 +1183,7 @@ class DashboardOutputWriter:
                 if bucket is not None:
                     grouped_sections.setdefault(bucket, []).append(section)
 
-            group_blocks: list[str] = []
-            for label in ("Position players", "Pitching", "Planning & decisions"):
-                bucket_sections = grouped_sections.get(label, [])
-                if not bucket_sections:
-                    continue
-                cards: list[str] = []
-                for section in bucket_sections:
-                    slug = self.slugify(section.title)
-                    preview, preview_modes, preview_labels, preview_default_mode = self._build_overview_preview(section)
-                    linked_preview = (
-                        self.link_player_names(preview, player_links.get(section.group, {})) if section.group else preview
-                    )
-                    description = self._section_description(section) or self._section_snapshot_text(section)
-                    cards.append(
-                        f"""
-                        <section class="section-card section-card-compact">
-                          <header class="section-card-header">
-                            <div>
-                              <p class="section-kicker">{escape(label)}</p>
-                              <h2>{escape(section.title)}</h2>
-                            </div>
-                            <a class="section-link section-link-inline" href="{slug}.html">Open</a>
-                          </header>
-                          <p>{escape(description)}</p>
-                          <div class="section-meta-row">
-                            <span class="section-meta-pill">{len(section.df)} rows</span>
-                            <span class="section-meta-pill">Preview</span>
-                          </div>
-                          <div class="table-wrap">
-                            {self.html_table(
-                                linked_preview,
-                                allow_html=True,
-                                sortable=False,
-                                highlight_starters=section.highlight_starters,
-                                column_modes=preview_modes,
-                                column_labels=preview_labels,
-                                default_mode=preview_default_mode,
-                            )}
-                          </div>
-                        </section>
-                        """
-                    )
-                group_blocks.append(
-                    f"""
-                    <section class="dashboard-group">
-                      <div class="dashboard-group-heading">
-                        <h2>{escape(label)}</h2>
-                      </div>
-                      <section class="section-grid section-grid-overview">
-                        {''.join(cards)}
-                      </section>
-                    </section>
-                    """
-                )
-
-            if not group_blocks:
-                group_blocks.append('<p class="empty-state">No team pages available.</p>')
+            report_buttons = self._team_hub_report_buttons(grouped_sections) or '<p class="empty-state">No team pages available.</p>'
 
             return f"""
                 <section class="dashboard-overview">
@@ -1097,12 +1191,12 @@ class DashboardOutputWriter:
                     <h2>{escape(team_name)} Team Hub</h2>
                     <p>{escape(intro)}</p>
                     <p>{escape(self._team_hub_intro(team_name, prefix, grouped_sections))}</p>
-                    <div class="section-meta-row">
-                      <span class="section-meta-pill">{sum(len(items) for items in grouped_sections.values())} linked reports</span>
-                      <span class="section-meta-pill">{escape('MLB focus' if prefix == 'mlb_' else 'AAA focus')}</span>
-                    </div>
+                    {report_buttons}
+                    <section class="summary-grid">
+                      {self._team_hub_summary_cards(prefix, frames, grouped_sections)}
+                    </section>
                   </section>
-                  {''.join(group_blocks)}
+                  {self._team_hub_data_sections(prefix, frames, player_links)}
                 </section>
             """
 
