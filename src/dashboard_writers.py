@@ -700,6 +700,312 @@ class DashboardOutputWriter:
             )
         return "".join(sections)
 
+    @staticmethod
+    def _present_columns(df: pd.DataFrame, columns: list[str]) -> list[str]:
+        return [column for column in columns if column in df.columns]
+
+    @staticmethod
+    def _count_matching(df: pd.DataFrame, column: str, predicate: Callable[[pd.Series], pd.Series]) -> int:
+        if df.empty or column not in df.columns:
+            return 0
+        series = df[column].fillna("")
+        try:
+            return int(predicate(series).sum())
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _count_injured(df: pd.DataFrame) -> int:
+        if df.empty or "injured_flag" not in df.columns:
+            return 0
+        return int(pd.to_numeric(df["injured_flag"], errors="coerce").fillna(0).astype(bool).sum())
+
+    @staticmethod
+    def _bool_series(df: pd.DataFrame, column: str) -> pd.Series:
+        if df.empty:
+            return pd.Series(dtype=bool)
+        if column not in df.columns:
+            return pd.Series(False, index=df.index, dtype=bool)
+        return pd.to_numeric(df[column], errors="coerce").fillna(0).astype(bool)
+
+    @staticmethod
+    def _summary_card_html(label: str, value: str, detail: str) -> str:
+        return (
+            '<article class="summary-card">'
+            f'<span class="eyebrow">{escape(label)}</span>'
+            f'<strong>{escape(value)}</strong>'
+            f'<p style="margin:8px 0 0;color:var(--muted);font-size:0.92rem;line-height:1.45;">{escape(detail)}</p>'
+            "</article>"
+        )
+
+    def _dashboard_summary_cards(self, team_needs_df: pd.DataFrame, transactions_df: pd.DataFrame, frames: dict[str, pd.DataFrame]) -> str:
+        high_priority_needs = 0
+        if not team_needs_df.empty and "priority" in team_needs_df.columns:
+            high_priority_needs = int(team_needs_df["priority"].fillna("").astype(str).str.upper().eq("HIGH").sum())
+
+        mlb_hitters = frames.get("mlb_hitters", pd.DataFrame()) if isinstance(frames, dict) else pd.DataFrame()
+        mlb_pitchers = frames.get("mlb_pitchers", pd.DataFrame()) if isinstance(frames, dict) else pd.DataFrame()
+        aaa_hitters = frames.get("aaa_hitters", pd.DataFrame()) if isinstance(frames, dict) else pd.DataFrame()
+        aaa_pitchers = frames.get("aaa_pitchers", pd.DataFrame()) if isinstance(frames, dict) else pd.DataFrame()
+
+        total_mlb_injuries = self._count_injured(mlb_hitters) + self._count_injured(mlb_pitchers)
+        call_ups = self._count_matching(
+            transactions_df,
+            "move_type",
+            lambda series: series.astype(str).str.upper().str.startswith("CALL UP"),
+        )
+        external_targets = self._count_matching(
+            transactions_df,
+            "move_type",
+            lambda series: series.astype(str).str.upper().str.startswith("ACQUIRE"),
+        )
+
+        promotion_pool = 0
+        if not aaa_hitters.empty and "projection_hitter_score" in aaa_hitters.columns:
+            promotion_pool += int(pd.to_numeric(aaa_hitters["projection_hitter_score"], errors="coerce").fillna(0).ge(10.5).sum())
+        if not aaa_pitchers.empty and "projection_pitcher_score" in aaa_pitchers.columns:
+            promotion_pool += int(pd.to_numeric(aaa_pitchers["projection_pitcher_score"], errors="coerce").fillna(0).ge(9.5).sum())
+
+        cards = [
+            self._summary_card_html(
+                "High-priority needs",
+                str(high_priority_needs),
+                "Roster areas currently flagged as the most urgent improvement targets.",
+            ),
+            self._summary_card_html(
+                "MLB injuries",
+                str(total_mlb_injuries),
+                "Current injured players on the MLB roster across hitters and pitchers.",
+            ),
+            self._summary_card_html(
+                "Call-up pressure",
+                str(call_ups),
+                "Promotion recommendations currently strong enough to show up on the transaction page.",
+            ),
+            self._summary_card_html(
+                "Outside help",
+                str(external_targets),
+                "Need areas where the organization likely does not have enough internal coverage.",
+            ),
+            self._summary_card_html(
+                "AAA watchlist",
+                str(promotion_pool),
+                "AAA players with stronger promotion-level projection scores right now.",
+            ),
+        ]
+        return "".join(cards)
+
+    def _prepare_dashboard_table(
+        self,
+        df: pd.DataFrame,
+        columns: list[str],
+        sort_by: str | None = None,
+        ascending: bool = False,
+        head: int = 5,
+        rename: dict[str, str] | None = None,
+    ) -> pd.DataFrame:
+        if df.empty:
+            return pd.DataFrame()
+
+        working = df.copy()
+        if sort_by and sort_by in working.columns:
+            working = working.sort_values(sort_by, ascending=ascending, na_position="last")
+        selected_columns = self._present_columns(working, columns)
+        if selected_columns:
+            working = working[selected_columns]
+        working = working.head(head).reset_index(drop=True)
+        if rename:
+            working = working.rename(columns={key: value for key, value in rename.items() if key in working.columns})
+        return self.format_ip_columns(self.round_score_columns(working))
+
+    def _render_dashboard_table_section(
+        self,
+        title: str,
+        description: str,
+        df: pd.DataFrame,
+        group: str | None = None,
+        player_links: dict[str, dict[str, str]] | None = None,
+    ) -> str:
+        linked_df = df
+        if group and player_links:
+            linked_df = self.link_player_names(df, player_links.get(group, {}))
+        return f"""
+        <section class="section-card section-card-compact">
+          <h2>{escape(title)}</h2>
+          <p>{escape(description)}</p>
+          <div class="table-wrap">
+            {self.html_table(linked_df, allow_html=True, sortable=False)}
+          </div>
+        </section>
+        """
+
+    def _dashboard_body(
+        self,
+        sections: list[DashboardSection],
+        outputs: DashboardOutputs,
+        frames: dict[str, pd.DataFrame],
+        player_links: dict[str, dict[str, str]],
+    ) -> str:
+        section_lookup = {section.title: section for section in sections}
+        team_needs_df = section_lookup.get("Team needs", DashboardSection("Team needs", pd.DataFrame())).df
+        transactions_df = outputs.recommended_transactions if isinstance(outputs.recommended_transactions, pd.DataFrame) else pd.DataFrame()
+
+        mlb_hitters = frames.get("mlb_hitters", pd.DataFrame()) if isinstance(frames, dict) else pd.DataFrame()
+        mlb_pitchers = frames.get("mlb_pitchers", pd.DataFrame()) if isinstance(frames, dict) else pd.DataFrame()
+        aaa_hitters = frames.get("aaa_hitters", pd.DataFrame()) if isinstance(frames, dict) else pd.DataFrame()
+        aaa_pitchers = frames.get("aaa_pitchers", pd.DataFrame()) if isinstance(frames, dict) else pd.DataFrame()
+
+        mlb_hitter_injured = self._bool_series(mlb_hitters, "injured_flag")
+        mlb_pitcher_injured = self._bool_series(mlb_pitchers, "injured_flag")
+        aaa_hitter_injured = self._bool_series(aaa_hitters, "injured_flag")
+        aaa_pitcher_injured = self._bool_series(aaa_pitchers, "injured_flag")
+
+        top_hitters = self._prepare_dashboard_table(
+            mlb_hitters.loc[~mlb_hitter_injured].copy() if not mlb_hitters.empty else pd.DataFrame(),
+            ["player_name", "primary_position", "overall_hitter_score", "ops_val", "war_val", "pa_val"],
+            sort_by="overall_hitter_score",
+            rename={
+                "primary_position": "pos",
+                "overall_hitter_score": "score",
+                "ops_val": "ops",
+                "war_val": "war",
+                "pa_val": "pa",
+            },
+        )
+        top_pitchers = self._prepare_dashboard_table(
+            mlb_pitchers.loc[~mlb_pitcher_injured].copy() if not mlb_pitchers.empty else pd.DataFrame(),
+            ["player_name", "score", "era_val", "fip_val", "ip_val", "stamina_now"],
+            sort_by="score",
+            rename={
+                "era_val": "era",
+                "fip_val": "fip",
+                "ip_val": "ip",
+                "stamina_now": "stamina",
+            },
+        )
+        needs_table = self._prepare_dashboard_table(
+            team_needs_df,
+            ["priority", "area", "need", "internal_options"],
+            sort_by="priority_value",
+            rename={"internal_options": "internal options"},
+            head=6,
+        )
+        injured_players = pd.concat(
+            [
+                mlb_hitters.loc[mlb_hitter_injured, :] if not mlb_hitters.empty else pd.DataFrame(),
+                mlb_pitchers.loc[mlb_pitcher_injured, :] if not mlb_pitchers.empty else pd.DataFrame(),
+            ],
+            ignore_index=True,
+        )
+        if not injured_players.empty and "player_name" in injured_players.columns:
+            injured_players["unit"] = [
+                "Pitching" if bool(value) else "Hitters"
+                for value in self._bool_series(injured_players, "is_pitcher")
+            ]
+        injuries_table = self._prepare_dashboard_table(
+            injured_players,
+            ["unit", "player_name", "primary_position", "injury_text", "status"],
+            rename={"primary_position": "pos", "injury_text": "injury"},
+            head=8,
+        )
+        aaa_hitter_watch = self._prepare_dashboard_table(
+            aaa_hitters.loc[~aaa_hitter_injured].copy() if not aaa_hitters.empty else pd.DataFrame(),
+            ["player_name", "primary_position", "projection_hitter_score", "ops_val", "age_val", "bats"],
+            sort_by="projection_hitter_score",
+            rename={
+                "primary_position": "pos",
+                "projection_hitter_score": "proj score",
+                "ops_val": "ops",
+                "age_val": "age",
+            },
+        )
+        aaa_pitcher_watch = self._prepare_dashboard_table(
+            aaa_pitchers.loc[~aaa_pitcher_injured].copy() if not aaa_pitchers.empty else pd.DataFrame(),
+            ["player_name", "projection_pitcher_score", "era_val", "fip_val", "ip_val", "age_val", "throws"],
+            sort_by="projection_pitcher_score",
+            rename={
+                "projection_pitcher_score": "proj score",
+                "era_val": "era",
+                "fip_val": "fip",
+                "ip_val": "ip",
+                "age_val": "age",
+            },
+        )
+
+        return f"""
+        <section class="dashboard-overview">
+          <section class="section-card">
+            <h2>Organization Status</h2>
+            <p>
+              This dashboard is meant to be a quick scan of club health, current pressure points, MLB performance leaders,
+              and AAA options pushing for a bigger role.
+            </p>
+            <section class="summary-grid">
+              {self._dashboard_summary_cards(team_needs_df, transactions_df, frames)}
+            </section>
+          </section>
+          <section class="dashboard-group">
+            <div class="dashboard-group-heading">
+              <h2>MLB Leaders</h2>
+            </div>
+            <section class="section-grid section-grid-overview">
+              {self._render_dashboard_table_section(
+                  "Top MLB hitters",
+                  "Best current healthy MLB bats by overall hitter score, with current production context.",
+                  top_hitters,
+                  "mlb_hitters",
+                  player_links,
+              )}
+              {self._render_dashboard_table_section(
+                  "Top MLB pitchers",
+                  "Best current healthy MLB arms by current pitcher score, with run-prevention context.",
+                  top_pitchers,
+                  "mlb_pitchers",
+                  player_links,
+              )}
+            </section>
+          </section>
+          <section class="dashboard-group">
+            <div class="dashboard-group-heading">
+              <h2>Pressure Points</h2>
+            </div>
+            <section class="section-grid section-grid-overview">
+              {self._render_dashboard_table_section(
+                  "Current needs",
+                  "Most pressing roster areas based on MLB quality, AAA cover, age risk, and handedness balance.",
+                  needs_table,
+              )}
+              {self._render_dashboard_table_section(
+                  "Availability",
+                  "Current injured MLB players and the roster areas they are affecting right now.",
+                  injuries_table,
+              )}
+            </section>
+          </section>
+          <section class="dashboard-group">
+            <div class="dashboard-group-heading">
+              <h2>AAA Watch</h2>
+            </div>
+            <section class="section-grid section-grid-overview">
+              {self._render_dashboard_table_section(
+                  "Top AAA hitters",
+                  "Best healthy AAA bats by projection score as near-term promotion candidates.",
+                  aaa_hitter_watch,
+                  "aaa_hitters",
+                  player_links,
+              )}
+              {self._render_dashboard_table_section(
+                  "Top AAA pitchers",
+                  "Best healthy AAA arms by projection score as call-up or depth candidates.",
+                  aaa_pitcher_watch,
+                  "aaa_pitchers",
+                  player_links,
+              )}
+            </section>
+          </section>
+        </section>
+        """
+
     def _write_html_outputs(self, outputs: DashboardOutputs, frames: dict[str, pd.DataFrame]) -> None:
         sections = self.output_sections(outputs)
         player_links = self.write_player_detail_pages(frames) if isinstance(frames, dict) else {}
@@ -708,68 +1014,7 @@ class DashboardOutputWriter:
             frames["_recommended_rotation"] = outputs.recommended_rotation.copy()
         mlb_home_slug = self.slugify(f"{self.mlb_team_name} team")
         aaa_home_slug = self.slugify(f"{self.aaa_team_name} team")
-
-        overview_sections_by_group: dict[str, list[str]] = {}
-        for section in sections:
-            group_label = self._dashboard_bucket(section)
-            if group_label is None:
-                continue
-            slug = self.slugify(section.title)
-            area_label = "Organization"
-            if section.group and section.group.startswith("mlb_"):
-                area_label = "MLB"
-            elif section.group and section.group.startswith("aaa_"):
-                area_label = "AAA"
-
-            snapshot = self._section_snapshot_text(section)
-            description = self._section_description(section) or snapshot
-            overview_sections_by_group.setdefault(group_label, []).append(
-                f"""
-                <article class="summary-card">
-                  <span class="eyebrow">{escape(group_label)}</span>
-                  <strong style="font-size:1.2rem;line-height:1.3;">{escape(section.title)}</strong>
-                  <p style="margin:10px 0 8px;color:var(--ink);font-size:0.96rem;">{escape(snapshot)}</p>
-                  <p style="margin:0 0 12px;color:var(--muted);font-size:0.92rem;line-height:1.55;">{escape(description)}</p>
-                  <div class="section-meta-row">
-                    <span class="section-meta-pill">{escape(area_label)}</span>
-                    <span class="section-meta-pill">{len(section.df)} rows</span>
-                  </div>
-                  <a class="section-link" href="{slug}.html">Open page</a>
-                </article>
-                """
-            )
-
-        overview_groups = []
-        for label in sorted(overview_sections_by_group.keys(), key=self._dashboard_bucket_order):
-            cards = overview_sections_by_group.get(label, [])
-            if not cards:
-                continue
-            overview_groups.append(
-                f"""
-                <section class="dashboard-group">
-                  <div class="dashboard-group-heading">
-                    <h2>{escape(label)}</h2>
-                  </div>
-                  <section class="summary-grid">
-                    {''.join(cards)}
-                  </section>
-                </section>
-                """
-            )
-
-        dashboard_body = f"""
-        <section class="dashboard-overview">
-          <section class="section-card">
-            <h2>Front Office Briefing</h2>
-            <p>
-              This landing page is now focused on the most actionable decisions first. Start with roster needs,
-              transactions, lineup, and rotation recommendations here, then move into the MLB and AAA hubs for the
-              supporting player boards and depth context.
-            </p>
-          </section>
-          {''.join(overview_groups)}
-        </section>
-        """
+        dashboard_body = self._dashboard_body(sections, outputs, frames, player_links)
         (self.out_dir / "dashboard.html").write_text(
             self.html_shell("OOTP DiamondOps", dashboard_body, "dashboard"),
             encoding="utf-8",
