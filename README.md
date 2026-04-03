@@ -4,6 +4,14 @@
 
 OOTP DiamondOps generates a baseball operations site for an MLB club and its AAA affiliate from OOTP exports. It combines current performance, OOTP ratings, roster status, and organizational depth into linked HTML reports, CSV tables, and a Markdown summary for front-office review.
 
+<p align="center">
+  <img src="docs/images/ootp-diamond-ops_dashboard.png" alt="Dashboard screenshot" width="48%">
+  <img src="docs/images/ootp-diamond-ops_detroit_team.png" alt="Team page screenshot" width="48%">
+</p>
+<p align="center">
+  <em>Dashboard overview and team hub pages.</em>
+</p>
+
 ## What It Produces
 
 One run currently generates:
